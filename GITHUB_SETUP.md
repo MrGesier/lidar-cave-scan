@@ -1,25 +1,21 @@
 # Publication sur GitHub
 
-Le projet est déjà initialisé comme dépôt Git local sur la branche `main`.
+Le projet a ete publie sur GitHub :
 
-## Depuis l'interface GitHub
+- Depot : https://github.com/MrGesier/lidar-cave-scan
+- Branche : `main`
+- Remote local : `origin`
 
-1. Créez un dépôt vide nommé `lidar-cave-scan` sur le compte `MrGesier`.
-2. Ne cochez pas l'ajout automatique d'un README, d'un `.gitignore` ou d'une licence, car ils sont déjà fournis ici.
-3. Dans ce dossier, lancez :
-
-```bash
-git remote add origin https://github.com/MrGesier/lidar-cave-scan.git
-git push -u origin main
-```
-
-## Si un dépôt existe déjà
-
-Si le dépôt existe sous un autre nom, remplacez l'URL :
+Pour pousser de futurs changements depuis ce dossier :
 
 ```bash
-git remote add origin https://github.com/MrGesier/NOM-DU-DEPOT.git
-git push -u origin main
+git add .
+git commit -m "Describe your change"
+git push
 ```
 
-Si GitHub refuse le push parce que le dépôt distant contient déjà des fichiers, créez plutôt une branche ou clonez le dépôt distant puis copiez ce projet dedans.
+Pour verifier l'URL distante :
+
+```bash
+git remote -v
+```
