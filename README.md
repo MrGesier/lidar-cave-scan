@@ -1,0 +1,140 @@
+# LiDAR Cave Scan
+
+Outil Python de présélection de dépressions de surface dans un MNT LiDAR, avec deux utilitaires de recherche SAR expérimentaux. Le projet est prêt à être publié sur GitHub et à être déployé dans un conteneur Docker.
+
+Important : cet outil ne détecte pas directement les grottes, ne voit pas sous terre et ne fournit pas une probabilité de cavité. Les résultats sont des indices de tri à vérifier dans QGIS et sur le terrain par des personnes compétentes et autorisées.
+
+## Fonctionnalités
+
+- Analyse d'un MNT LiDAR GeoTIFF en CRS projeté métrique.
+- Détection de dépressions fermées par remplissage priority-flood.
+- Export de rasters, GeoPackage, CSV, carte PNG et métadonnées JSON.
+- Croisement facultatif avec géologie, cavités connues et failles.
+- Démo micro-Doppler SAR sur données synthétiques.
+- Recherche de métadonnées publiques Sentinel-1 SLC via le catalogue STAC Copernicus.
+
+## Structure
+
+```text
+.
+├── app.py
+├── src/lidar_cave_scan/
+│   ├── cli.py
+│   ├── lidar.py
+│   ├── microdoppler.py
+│   └── catalog.py
+├── tests/
+├── requirements.txt
+├── pyproject.toml
+├── Dockerfile
+└── .github/workflows/ci.yml
+```
+
+## Installation locale
+
+Python 3.11 ou 3.12 est recommandé.
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+Sous Windows, l'installation de `rasterio` et `geopandas` peut nécessiter un environnement conda-forge si `pip` échoue :
+
+```powershell
+conda create -n lidar-cave-scan -c conda-forge python=3.12 numpy scipy rasterio geopandas shapely pyproj matplotlib
+conda activate lidar-cave-scan
+python -m pip install -e .
+```
+
+## Analyse LiDAR
+
+Téléchargez un MNT LiDAR HD terrain nu au format GeoTIFF. Les coordonnées de `--bbox` doivent être dans le CRS projeté du raster, par exemple Lambert-93 EPSG:2154 en France métropolitaine. N'utilisez pas directement latitude/longitude pour cette commande.
+
+```powershell
+python app.py lidar --dem "C:\data\mnt.tif" --out outputs\barzun
+```
+
+Avec une emprise métrique :
+
+```powershell
+python app.py lidar --dem "C:\data\mnt.tif" --bbox 421000 6242000 422000 6243000 --min-depth 0.5 --min-area 10 --max-area 10000 --out outputs\barzun
+```
+
+### Couches facultatives
+
+Les couches vectorielles doivent avoir un CRS défini. La couche géologique doit déjà être filtrée sur les lithologies pertinentes.
+
+```powershell
+python app.py lidar --dem "C:\data\mnt.tif" --geology "C:\data\calcaires.gpkg" --cavities "C:\data\cavites.gpkg" --faults "C:\data\failles.gpkg"
+```
+
+## Résultats LiDAR
+
+- `fill_depth.tif` : profondeur de remplissage en mètres.
+- `slope_deg.tif` : pente en degrés.
+- `candidate_ids.tif` : identifiants raster des dépressions conservées.
+- `candidates.gpkg` : polygones et attributs pour QGIS.
+- `candidates.csv` : table lisible dans Excel/QGIS.
+- `map.png` : carte d'inspection avec ombrage et contours.
+- `run.json` : paramètres et provenance.
+
+## Micro-Doppler SAR expérimental
+
+Démo synthétique :
+
+```powershell
+python app.py microdoppler --demo --out outputs\microdoppler_demo
+```
+
+Analyse d'une série cohérente préparée :
+
+```powershell
+python app.py microdoppler --input prepared_target.npz --out outputs\target01
+```
+
+Le fichier NPZ doit contenir `time_s`, `samples`, `wavelength_m` et éventuellement `reference`. Le module n'extrait pas de vibrations depuis une image Sentinel-1 standard et ne valide pas une cavité.
+
+## Catalogue SAR public
+
+La recherche utilise l'endpoint STAC Copernicus Data Space et nécessite Internet.
+
+```powershell
+python app.py catalog --bbox -0.25 43.0 -0.05 43.15 --start 2025-01-01 --end 2025-02-01 --out outputs\barzun_sar.json
+```
+
+Les coordonnées de `catalog --bbox` sont en WGS84 longitude/latitude. Les résultats sont des métadonnées de catalogue, pas des images téléchargées.
+
+## Déploiement Docker
+
+Construire l'image :
+
+```bash
+docker build -t lidar-cave-scan .
+```
+
+Lancer une analyse en montant un dossier de données :
+
+```bash
+docker run --rm -v "$PWD/data:/data" -v "$PWD/outputs:/app/outputs" lidar-cave-scan lidar --dem /data/mnt.tif --out /app/outputs/run01
+```
+
+Démo micro-Doppler :
+
+```bash
+docker run --rm -v "$PWD/outputs:/app/outputs" lidar-cave-scan microdoppler --demo --out /app/outputs/microdoppler_demo
+```
+
+## Tests
+
+```powershell
+python -m unittest discover -s tests
+```
+
+## Limites et sécurité
+
+Le score `terrain_score` est un score heuristique de tri. Les carrières, terrassements, mares, erreurs de MNT, artefacts de bordure et bassins tronqués peuvent produire de faux positifs. Toute interprétation doit être contrôlée dans QGIS avec orthophotos, géologie, inventaires publics et expertise locale.
+
+Ne pénétrez jamais dans une cavité non reconnue ou non autorisée. Les risques incluent effondrement, chute, atmosphère dangereuse et restrictions de protection de sites ou de propriétés privées.
