@@ -134,9 +134,14 @@ python app.py lidar --dem "C:\data\mnt.tif" --geology "C:\data\calcaires.gpkg" -
 - `slope_deg.tif` : pente en degrés.
 - `candidate_ids.tif` : identifiants raster des dépressions conservées.
 - `candidates.gpkg` : polygones et attributs pour QGIS.
+- `candidates.geojson` : version GeoJSON pour webmapping ou outils SIG légers.
 - `candidates.csv` : table lisible dans Excel/QGIS.
-- `map.png` : carte d'inspection avec ombrage et contours.
+- `map.png` : carte d'inspection avec ombrage, contours, classes et scores.
+- `ranked_candidates.png` : graphique de classement des candidats.
+- `report.html` : rapport lisible dans le navigateur avec synthèse, carte et tableau.
 - `run.json` : paramètres et provenance.
+
+Les champs enrichis incluent `priority_class`, `hypothesis`, `review_hint`, `p90_depth_m`, `equiv_diameter_m`, `elongation_ratio`, `bbox_width_m` et `bbox_height_m`.
 
 ## Micro-Doppler SAR expérimental
 

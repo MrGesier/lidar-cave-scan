@@ -5,6 +5,7 @@ LiDAR Cave Scan - mode d'emploi rapide
 2. Pour tester sans données externes, ouvrez l'onglet Demo.
 3. Cliquez sur "Créer et analyser un MNT de test".
 4. Cliquez sur "Ouvrir les résultats" pour voir map.png, candidates.csv et les rasters.
+5. Cliquez sur "Rapport HTML" pour ouvrir report.html dans le navigateur.
 
 Si le lancement échoue parce que les dépendances ne sont pas installées :
 
@@ -15,7 +16,10 @@ Si le lancement échoue parce que les dépendances ne sont pas installées :
 Données incluses :
 
 - examples\demo_dem.tif : MNT GeoTIFF synthétique de test
-- outputs\demo_lidar\map.png : carte de démo déjà générée
-- outputs\demo_lidar\candidates.csv : table des candidats déjà générée
+- outputs\demo_lidar\report.html : rapport de démo déjà généré
+- outputs\demo_lidar\map.png : carte de démo avec scores et classes
+- outputs\demo_lidar\ranked_candidates.png : graphique de classement
+- outputs\demo_lidar\candidates.csv : table enrichie des candidats
+- outputs\demo_lidar\candidates.geojson : export SIG léger
 
 Important : l'outil présélectionne des dépressions de surface. Il ne confirme pas des grottes et ne voit pas sous terre.

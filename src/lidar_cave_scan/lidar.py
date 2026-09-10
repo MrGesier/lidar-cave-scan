@@ -3,10 +3,65 @@
 from __future__ import annotations
 
 import heapq
+import html
 import json
 import math
 from pathlib import Path
 from typing import Sequence
+
+
+def priority_class(score: float) -> str:
+    """Return a practical review class from the heuristic terrain score."""
+    if score >= 75:
+        return "A - priorite terrain"
+    if score >= 55:
+        return "B - interessant"
+    if score >= 35:
+        return "C - controle rapide"
+    return "D - faible signal"
+
+
+def candidate_hypothesis(row) -> str:
+    """Describe why a candidate deserves attention without claiming a cave."""
+    parts = []
+    if row.get("max_depth_m", 0) >= 2.0:
+        parts.append("depression marquee")
+    elif row.get("max_depth_m", 0) >= 1.0:
+        parts.append("relief net")
+    else:
+        parts.append("relief subtil")
+
+    if row.get("circularity", 0) >= 0.65:
+        parts.append("forme compacte")
+    elif row.get("elongation_ratio", 1) >= 2.5:
+        parts.append("forme allongee")
+
+    if row.get("fill_volume_m3", 0) >= 500:
+        parts.append("volume notable")
+
+    if row.get("karst_layer_intersects", False):
+        parts.append("croise la couche karst")
+
+    dist_cavities = row.get("dist_cavities_m")
+    if dist_cavities == dist_cavities and dist_cavities is not None and dist_cavities <= 250:
+        parts.append("proche d'une cavite connue")
+
+    if row.get("nodata_edge", False):
+        parts.append("attention bordure/nodata")
+
+    return ", ".join(parts)
+
+
+def review_hint(row) -> str:
+    if row.get("nodata_edge", False):
+        return "Verifier d'abord les bords de dalle et les pixels nodata."
+    if row.get("terrain_score", 0) >= 75:
+        return "Priorite haute: controler orthophoto, geologie et terrain si autorise."
+    if row.get("terrain_score", 0) >= 55:
+        return "Bon candidat: comparer avec ombrages multiples et inventaires publics."
+    if row.get("terrain_score", 0) >= 35:
+        return "Signal moyen: utile pour balayage QGIS, faible conclusion seul."
+    return "Signal faible: conserver comme bruit potentiel ou controle secondaire."
 
 
 def fill_depressions(dem, valid):
@@ -100,6 +155,13 @@ def detect(dem, valid, transform, crs, min_depth=0.5, min_area=10, max_area=1000
         perimeter = geom.length
         circularity = float(4 * math.pi * geom.area / perimeter**2) if perimeter else 0
         volume = float(vals.sum() * pixel_area)
+        minx, miny, maxx, maxy = geom.bounds
+        width = abs(maxx - minx)
+        height = abs(maxy - miny)
+        long_axis = max(width, height)
+        short_axis = max(min(width, height), 1e-9)
+        p90_depth = float(np.percentile(vals, 90))
+        equivalent_diameter = float(math.sqrt((4 * area) / math.pi)) if area > 0 else 0
         score = min(
             100,
             round(
@@ -118,6 +180,11 @@ def detect(dem, valid, transform, crs, min_depth=0.5, min_area=10, max_area=1000
             "max_depth_m": round(dmax, 3),
             "mean_depth_m": round(float(vals.mean()), 3),
             "fill_volume_m3": round(volume, 2),
+            "p90_depth_m": round(p90_depth, 3),
+            "equiv_diameter_m": round(equivalent_diameter, 2),
+            "bbox_width_m": round(width, 2),
+            "bbox_height_m": round(height, 2),
+            "elongation_ratio": round(long_axis / short_axis, 2),
             "circularity": round(circularity, 3),
             "terrain_score": score,
             "nodata_edge": near_invalid,
@@ -134,8 +201,16 @@ def detect(dem, valid, transform, crs, min_depth=0.5, min_area=10, max_area=1000
         "max_depth_m",
         "mean_depth_m",
         "fill_volume_m3",
+        "p90_depth_m",
+        "equiv_diameter_m",
+        "bbox_width_m",
+        "bbox_height_m",
+        "elongation_ratio",
         "circularity",
         "terrain_score",
+        "priority_class",
+        "hypothesis",
+        "review_hint",
         "nodata_edge",
         "x",
         "y",
@@ -143,6 +218,16 @@ def detect(dem, valid, transform, crs, min_depth=0.5, min_area=10, max_area=1000
     ]
     gdf = gpd.GeoDataFrame(records, geometry="geometry", crs=crs) if records else gpd.GeoDataFrame(columns=columns, geometry="geometry", crs=crs)
     return filled, depth, ids, gdf
+
+
+def enrich_candidates(candidates):
+    if not len(candidates):
+        return candidates
+    candidates = candidates.copy()
+    candidates["priority_class"] = [priority_class(score) for score in candidates["terrain_score"]]
+    candidates["hypothesis"] = [candidate_hypothesis(row) for _, row in candidates.iterrows()]
+    candidates["review_hint"] = [review_hint(row) for _, row in candidates.iterrows()]
+    return candidates
 
 
 def write_raster(path, data, profile, nodata=None):
@@ -162,6 +247,93 @@ def write_raster(path, data, profile, nodata=None):
         raster_profile.pop("nodata", None)
     with rasterio.open(path, "w", **raster_profile) as dst:
         dst.write(data, 1)
+
+
+def write_report(out: Path, candidates, run_metadata: dict) -> None:
+    rows = []
+    for _, row in candidates.head(100).iterrows():
+        rows.append(
+            "<tr>"
+            f"<td>{int(row['id'])}</td>"
+            f"<td>{html.escape(str(row.get('priority_class', '')))}</td>"
+            f"<td>{row.get('terrain_score', '')}</td>"
+            f"<td>{row.get('max_depth_m', '')}</td>"
+            f"<td>{row.get('p90_depth_m', '')}</td>"
+            f"<td>{row.get('area_m2', '')}</td>"
+            f"<td>{row.get('fill_volume_m3', '')}</td>"
+            f"<td>{html.escape(str(row.get('hypothesis', '')))}</td>"
+            f"<td>{html.escape(str(row.get('review_hint', '')))}</td>"
+            f"<td>{row.get('x', '')}</td>"
+            f"<td>{row.get('y', '')}</td>"
+            "</tr>"
+        )
+
+    if rows:
+        table = "\n".join(rows)
+    else:
+        table = '<tr><td colspan="11">Aucun candidat conserve avec ces seuils.</td></tr>'
+
+    report = f"""<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Rapport LiDAR Cave Scan</title>
+  <style>
+    body {{ margin: 0; font-family: Segoe UI, Arial, sans-serif; color: #19201d; background: #f3f0e8; }}
+    header {{ padding: 28px 34px; background: #173b35; color: white; }}
+    h1 {{ margin: 0 0 8px; font-size: 30px; }}
+    main {{ padding: 24px 34px 40px; }}
+    .grid {{ display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 12px; margin-bottom: 22px; }}
+    .metric {{ background: white; border-left: 5px solid #d4573d; padding: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.08); }}
+    .metric strong {{ display: block; font-size: 24px; }}
+    .panel {{ background: white; padding: 18px; margin: 18px 0; box-shadow: 0 1px 2px rgba(0,0,0,.08); }}
+    img {{ max-width: 100%; border: 1px solid #d5d0c4; }}
+    table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+    th, td {{ padding: 8px 9px; border-bottom: 1px solid #e2ddd2; text-align: left; vertical-align: top; }}
+    th {{ background: #ede7dc; position: sticky; top: 0; }}
+    .warning {{ color: #6b2e1d; background: #fff0e8; border-left: 5px solid #d4573d; padding: 12px 14px; }}
+    a {{ color: #0b5a74; }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Rapport LiDAR Cave Scan</h1>
+    <div>Presélection morphologique de dépressions de surface, sans validation de cavité.</div>
+  </header>
+  <main>
+    <section class="grid">
+      <div class="metric"><span>Candidats</span><strong>{run_metadata.get('candidates', 0)}</strong></div>
+      <div class="metric"><span>Meilleur score</span><strong>{int(candidates['terrain_score'].max()) if len(candidates) else 0}</strong></div>
+      <div class="metric"><span>CRS</span><strong style="font-size:15px">{html.escape(str(run_metadata.get('crs', '')))}</strong></div>
+      <div class="metric"><span>Seuil profondeur</span><strong>{run_metadata['parameters'].get('min_depth')} m</strong></div>
+    </section>
+    <p class="warning">{html.escape(run_metadata.get('warning', ''))}</p>
+    <section class="panel">
+      <h2>Carte d'inspection</h2>
+      <p>Rouge/orange = candidats classés par score. L'image sert au contrôle visuel, pas à une confirmation.</p>
+      <img src="map.png" alt="Carte des candidats LiDAR">
+    </section>
+    <section class="panel">
+      <h2>Classement des candidats</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>Classe</th><th>Score</th><th>Max m</th><th>P90 m</th><th>Surface m²</th>
+            <th>Volume m³</th><th>Hypothèse</th><th>Contrôle conseillé</th><th>X</th><th>Y</th>
+          </tr>
+        </thead>
+        <tbody>{table}</tbody>
+      </table>
+    </section>
+    <section class="panel">
+      <h2>Fichiers produits</h2>
+      <p><a href="candidates.csv">candidates.csv</a> · <a href="candidates.geojson">candidates.geojson</a> · <a href="candidates.gpkg">candidates.gpkg</a> · <a href="ranked_candidates.png">ranked_candidates.png</a></p>
+    </section>
+  </main>
+</body>
+</html>
+"""
+    (out / "report.html").write_text(report, encoding="utf-8")
 
 
 def run_lidar_scan(
@@ -226,13 +398,17 @@ def run_lidar_scan(
                 round(geom.distance(union), 1) if union is not None else np.nan for geom in candidates.geometry
             ]
 
+    candidates = enrich_candidates(candidates)
+
     if len(candidates):
         if "karst_layer_intersects" in candidates:
             candidates["terrain_score"] = (
                 candidates.terrain_score + candidates.karst_layer_intersects.astype(int) * 15
             ).clip(0, 100)
+            candidates = enrich_candidates(candidates)
         candidates = candidates.sort_values("terrain_score", ascending=False)
         candidates.to_file(out / "candidates.gpkg", layer="candidates", driver="GPKG")
+        candidates.to_file(out / "candidates.geojson", driver="GeoJSON")
     candidates.drop(columns="geometry").to_csv(out / "candidates.csv", index=False)
 
     dx = abs(transform.a)
@@ -242,7 +418,7 @@ def run_lidar_scan(
     write_raster(out / "slope_deg.tif", np.where(valid, slope, -9999).astype("float32"), profile, -9999)
 
     shade = LightSource(azdeg=315, altdeg=45).hillshade(dem, vert_exag=1, dx=dx, dy=dy)
-    fig, ax = plt.subplots(figsize=(12, 9))
+    fig, ax = plt.subplots(figsize=(13, 9))
     extent = [
         transform.c,
         transform.c + dem.shape[1] * transform.a,
@@ -251,16 +427,48 @@ def run_lidar_scan(
     ]
     ax.imshow(np.ma.masked_where(~valid, shade), cmap="gray", extent=extent)
     if len(candidates):
-        candidates.boundary.plot(ax=ax, edgecolor="red", linewidth=1)
+        class_colors = {
+            "A - priorite terrain": "#d7191c",
+            "B - interessant": "#fdae61",
+            "C - controle rapide": "#2c7bb6",
+            "D - faible signal": "#969696",
+        }
+        for class_name, color in class_colors.items():
+            subset = candidates[candidates["priority_class"] == class_name]
+            if len(subset):
+                subset.boundary.plot(ax=ax, edgecolor=color, linewidth=1.8, label=class_name)
         for _, row in candidates.head(50).iterrows():
-            ax.annotate(str(row["id"]), (row["x"], row["y"]), fontsize=7, color="red")
-    ax.set_title("Depressions candidates - LiDAR (non validees)")
+            ax.annotate(
+                f"{row['id']} ({row['terrain_score']})",
+                (row["x"], row["y"]),
+                fontsize=8,
+                color="#101010",
+                bbox={"boxstyle": "round,pad=0.18", "fc": "white", "ec": "none", "alpha": 0.78},
+            )
+        ax.legend(loc="upper right", framealpha=0.9)
+    ax.set_title("Depressions candidates - LiDAR (scores exploratoires, non valides)")
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
     ax.set_aspect("equal")
     fig.tight_layout()
     fig.savefig(out / "map.png", dpi=160)
     plt.close(fig)
+
+    if len(candidates):
+        chart = candidates.head(20).sort_values("terrain_score")
+        fig, ax = plt.subplots(figsize=(9, max(3.5, len(chart) * 0.35)))
+        colors = [
+            "#d7191c" if score >= 75 else "#fdae61" if score >= 55 else "#2c7bb6" if score >= 35 else "#969696"
+            for score in chart["terrain_score"]
+        ]
+        ax.barh([str(int(v)) for v in chart["id"]], chart["terrain_score"], color=colors)
+        ax.set_xlabel("Score heuristique")
+        ax.set_ylabel("ID candidat")
+        ax.set_xlim(0, 100)
+        ax.set_title("Classement des candidats")
+        fig.tight_layout()
+        fig.savefig(out / "ranked_candidates.png", dpi=160)
+        plt.close(fig)
 
     run_metadata = {
         "input": str(dem_path),
@@ -279,5 +487,6 @@ def run_lidar_scan(
         "warning": "Screening only. No subsurface imaging or confirmed cave detection.",
     }
     (out / "run.json").write_text(json.dumps(run_metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    write_report(out, candidates, run_metadata)
     print(f"{len(candidates)} candidats. Resultats : {out.resolve()}")
     return out
