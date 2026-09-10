@@ -70,6 +70,12 @@ python -m pip install -e .
 Après installation, double-cliquez sur :
 
 ```text
+LANCER_LIDAR_CAVE_SCAN.bat
+```
+
+Ce raccourci ouvre l'interface desktop. Le lanceur historique reste aussi disponible :
+
+```text
 run_desktop.bat
 ```
 

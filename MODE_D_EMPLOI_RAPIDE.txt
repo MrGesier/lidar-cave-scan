@@ -1,0 +1,21 @@
+LiDAR Cave Scan - mode d'emploi rapide
+=======================================
+
+1. Double-cliquez sur LANCER_LIDAR_CAVE_SCAN.bat
+2. Pour tester sans données externes, ouvrez l'onglet Demo.
+3. Cliquez sur "Créer et analyser un MNT de test".
+4. Cliquez sur "Ouvrir les résultats" pour voir map.png, candidates.csv et les rasters.
+
+Si le lancement échoue parce que les dépendances ne sont pas installées :
+
+1. Double-cliquez sur install_windows.bat
+2. Attendez la fin de l'installation.
+3. Relancez LANCER_LIDAR_CAVE_SCAN.bat
+
+Données incluses :
+
+- examples\demo_dem.tif : MNT GeoTIFF synthétique de test
+- outputs\demo_lidar\map.png : carte de démo déjà générée
+- outputs\demo_lidar\candidates.csv : table des candidats déjà générée
+
+Important : l'outil présélectionne des dépressions de surface. Il ne confirme pas des grottes et ne voit pas sous terre.
