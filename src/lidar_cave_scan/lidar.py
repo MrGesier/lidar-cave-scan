@@ -230,6 +230,26 @@ def enrich_candidates(candidates):
     return candidates
 
 
+def add_wgs84_locations(candidates):
+    import geopandas as gpd
+
+    if not len(candidates):
+        return candidates
+    candidates = candidates.copy()
+    centroids = gpd.GeoSeries(candidates.geometry.centroid, crs=candidates.crs).to_crs(epsg=4326)
+    candidates["longitude"] = [round(point.x, 7) for point in centroids]
+    candidates["latitude"] = [round(point.y, 7) for point in centroids]
+    candidates["google_maps"] = [
+        f"https://www.google.com/maps?q={lat},{lon}"
+        for lat, lon in zip(candidates["latitude"], candidates["longitude"])
+    ]
+    candidates["openstreetmap"] = [
+        f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=18/{lat}/{lon}"
+        for lat, lon in zip(candidates["latitude"], candidates["longitude"])
+    ]
+    return candidates
+
+
 def write_raster(path, data, profile, nodata=None):
     import numpy as np
     import rasterio
@@ -249,6 +269,108 @@ def write_raster(path, data, profile, nodata=None):
         dst.write(data, 1)
 
 
+def write_interactive_map(out: Path, candidates) -> None:
+    if len(candidates):
+        wgs84 = candidates.to_crs(epsg=4326)
+        center_lat = float(candidates["latitude"].mean()) if "latitude" in candidates else 46.5
+        center_lon = float(candidates["longitude"].mean()) if "longitude" in candidates else 2.5
+        geojson = wgs84.to_json()
+    else:
+        center_lat = 46.5
+        center_lon = 2.5
+        geojson = '{"type":"FeatureCollection","features":[]}'
+
+    map_html = f"""<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Carte interactive - LiDAR Cave Scan</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    html, body, #map {{ height: 100%; margin: 0; }}
+    body {{ font-family: Segoe UI, Arial, sans-serif; }}
+    .panel {{
+      position: absolute; z-index: 1000; top: 14px; left: 14px; max-width: 360px;
+      background: white; border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.18);
+      padding: 14px 16px; line-height: 1.35;
+    }}
+    .panel h1 {{ font-size: 18px; margin: 0 0 8px; }}
+    .panel p {{ margin: 6px 0; font-size: 13px; }}
+    .legend {{ display: grid; gap: 5px; margin-top: 8px; font-size: 13px; }}
+    .swatch {{ display: inline-block; width: 14px; height: 14px; margin-right: 7px; vertical-align: -2px; }}
+    .popup table {{ border-collapse: collapse; font-size: 12px; }}
+    .popup td {{ padding: 3px 6px 3px 0; vertical-align: top; }}
+    .popup a {{ color: #0b5a74; }}
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <aside class="panel">
+    <h1>LiDAR Cave Scan</h1>
+    <p>Carte zoomable des candidats. Les contours indiquent des dépressions de surface à vérifier, pas des grottes confirmées.</p>
+    <p>Utilise la molette pour zoomer/dézoomer, clique sur un candidat pour voir ses coordonnées.</p>
+    <div class="legend">
+      <div><span class="swatch" style="background:#d7191c"></span>A - priorite terrain</div>
+      <div><span class="swatch" style="background:#fdae61"></span>B - interessant</div>
+      <div><span class="swatch" style="background:#2c7bb6"></span>C - controle rapide</div>
+      <div><span class="swatch" style="background:#969696"></span>D - faible signal</div>
+    </div>
+  </aside>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const candidates = {geojson};
+    const colors = {{
+      "A - priorite terrain": "#d7191c",
+      "B - interessant": "#fdae61",
+      "C - controle rapide": "#2c7bb6",
+      "D - faible signal": "#969696"
+    }};
+    const map = L.map("map", {{ scrollWheelZoom: true }}).setView([{center_lat:.7f}, {center_lon:.7f}], 17);
+    L.tileLayer("https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
+      maxZoom: 20,
+      attribution: "&copy; OpenStreetMap contributors"
+    }}).addTo(map);
+
+    const layer = L.geoJSON(candidates, {{
+      style: feature => ({{
+        color: colors[feature.properties.priority_class] || "#d4573d",
+        weight: 3,
+        fillOpacity: 0.18
+      }}),
+      onEachFeature: (feature, layer) => {{
+        const p = feature.properties;
+        const lat = p.latitude;
+        const lon = p.longitude;
+        layer.bindPopup(`
+          <div class="popup">
+            <h3>Candidat ${{p.id}} - score ${{p.terrain_score}}</h3>
+            <table>
+              <tr><td>Classe</td><td>${{p.priority_class || ""}}</td></tr>
+              <tr><td>Coordonnées</td><td>${{lat}}, ${{lon}}</td></tr>
+              <tr><td>Profondeur max</td><td>${{p.max_depth_m}} m</td></tr>
+              <tr><td>Profondeur P90</td><td>${{p.p90_depth_m}} m</td></tr>
+              <tr><td>Surface</td><td>${{p.area_m2}} m²</td></tr>
+              <tr><td>Volume</td><td>${{p.fill_volume_m3}} m³</td></tr>
+              <tr><td>Lecture</td><td>${{p.hypothesis || ""}}</td></tr>
+              <tr><td>Action</td><td>${{p.review_hint || ""}}</td></tr>
+            </table>
+            <p><a target="_blank" href="${{p.google_maps}}">Ouvrir dans Google Maps</a></p>
+            <p><a target="_blank" href="${{p.openstreetmap}}">Ouvrir dans OpenStreetMap</a></p>
+          </div>
+        `);
+      }}
+    }}).addTo(map);
+    if (layer.getBounds().isValid()) {{
+      map.fitBounds(layer.getBounds(), {{ padding: [40, 40], maxZoom: 18 }});
+    }}
+  </script>
+</body>
+</html>
+"""
+    (out / "interactive_map.html").write_text(map_html, encoding="utf-8")
+
+
 def write_report(out: Path, candidates, run_metadata: dict) -> None:
     rows = []
     for _, row in candidates.head(100).iterrows():
@@ -263,6 +385,9 @@ def write_report(out: Path, candidates, run_metadata: dict) -> None:
             f"<td>{row.get('fill_volume_m3', '')}</td>"
             f"<td>{html.escape(str(row.get('hypothesis', '')))}</td>"
             f"<td>{html.escape(str(row.get('review_hint', '')))}</td>"
+            f"<td>{row.get('latitude', '')}</td>"
+            f"<td>{row.get('longitude', '')}</td>"
+            f"<td><a href=\"{html.escape(str(row.get('google_maps', '')))}\">Google Maps</a></td>"
             f"<td>{row.get('x', '')}</td>"
             f"<td>{row.get('y', '')}</td>"
             "</tr>"
@@ -271,7 +396,7 @@ def write_report(out: Path, candidates, run_metadata: dict) -> None:
     if rows:
         table = "\n".join(rows)
     else:
-        table = '<tr><td colspan="11">Aucun candidat conserve avec ces seuils.</td></tr>'
+        table = '<tr><td colspan="14">Aucun candidat conserve avec ces seuils.</td></tr>'
 
     report = f"""<!doctype html>
 <html lang="fr">
@@ -310,7 +435,8 @@ def write_report(out: Path, candidates, run_metadata: dict) -> None:
     <p class="warning">{html.escape(run_metadata.get('warning', ''))}</p>
     <section class="panel">
       <h2>Carte d'inspection</h2>
-      <p>Rouge/orange = candidats classés par score. L'image sert au contrôle visuel, pas à une confirmation.</p>
+      <p>Cette image sert au contrôle visuel. Pour zoomer, dézoomer et situer les points, ouvrez la carte interactive.</p>
+      <p><a href="interactive_map.html">Ouvrir la carte interactive zoomable</a></p>
       <img src="map.png" alt="Carte des candidats LiDAR">
     </section>
     <section class="panel">
@@ -319,7 +445,8 @@ def write_report(out: Path, candidates, run_metadata: dict) -> None:
         <thead>
           <tr>
             <th>ID</th><th>Classe</th><th>Score</th><th>Max m</th><th>P90 m</th><th>Surface m²</th>
-            <th>Volume m³</th><th>Hypothèse</th><th>Contrôle conseillé</th><th>X</th><th>Y</th>
+            <th>Volume m³</th><th>Hypothèse</th><th>Contrôle conseillé</th>
+            <th>Latitude</th><th>Longitude</th><th>Carte</th><th>X</th><th>Y</th>
           </tr>
         </thead>
         <tbody>{table}</tbody>
@@ -327,7 +454,7 @@ def write_report(out: Path, candidates, run_metadata: dict) -> None:
     </section>
     <section class="panel">
       <h2>Fichiers produits</h2>
-      <p><a href="candidates.csv">candidates.csv</a> · <a href="candidates.geojson">candidates.geojson</a> · <a href="candidates.gpkg">candidates.gpkg</a> · <a href="ranked_candidates.png">ranked_candidates.png</a></p>
+      <p><a href="interactive_map.html">interactive_map.html</a> · <a href="candidate_locations.csv">candidate_locations.csv</a> · <a href="candidates.csv">candidates.csv</a> · <a href="candidates.geojson">candidates.geojson</a> · <a href="candidates.gpkg">candidates.gpkg</a> · <a href="ranked_candidates.png">ranked_candidates.png</a></p>
     </section>
   </main>
 </body>
@@ -399,6 +526,7 @@ def run_lidar_scan(
             ]
 
     candidates = enrich_candidates(candidates)
+    candidates = add_wgs84_locations(candidates)
 
     if len(candidates):
         if "karst_layer_intersects" in candidates:
@@ -406,10 +534,31 @@ def run_lidar_scan(
                 candidates.terrain_score + candidates.karst_layer_intersects.astype(int) * 15
             ).clip(0, 100)
             candidates = enrich_candidates(candidates)
+            candidates = add_wgs84_locations(candidates)
         candidates = candidates.sort_values("terrain_score", ascending=False)
         candidates.to_file(out / "candidates.gpkg", layer="candidates", driver="GPKG")
         candidates.to_file(out / "candidates.geojson", driver="GeoJSON")
     candidates.drop(columns="geometry").to_csv(out / "candidates.csv", index=False)
+    location_columns = [
+        column
+        for column in [
+            "id",
+            "priority_class",
+            "terrain_score",
+            "latitude",
+            "longitude",
+            "google_maps",
+            "openstreetmap",
+            "max_depth_m",
+            "p90_depth_m",
+            "area_m2",
+            "fill_volume_m3",
+            "hypothesis",
+            "review_hint",
+        ]
+        if column in candidates.columns
+    ]
+    candidates[location_columns].to_csv(out / "candidate_locations.csv", index=False)
 
     dx = abs(transform.a)
     dy = abs(transform.e)
@@ -487,6 +636,7 @@ def run_lidar_scan(
         "warning": "Screening only. No subsurface imaging or confirmed cave detection.",
     }
     (out / "run.json").write_text(json.dumps(run_metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    write_interactive_map(out, candidates)
     write_report(out, candidates, run_metadata)
     print(f"{len(candidates)} candidats. Resultats : {out.resolve()}")
     return out

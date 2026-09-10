@@ -136,12 +136,16 @@ python app.py lidar --dem "C:\data\mnt.tif" --geology "C:\data\calcaires.gpkg" -
 - `candidates.gpkg` : polygones et attributs pour QGIS.
 - `candidates.geojson` : version GeoJSON pour webmapping ou outils SIG légers.
 - `candidates.csv` : table lisible dans Excel/QGIS.
+- `candidate_locations.csv` : coordonnées GPS, liens Google Maps/OpenStreetMap et résumé terrain.
 - `map.png` : carte d'inspection avec ombrage, contours, classes et scores.
+- `interactive_map.html` : carte zoomable/dézoomable avec fond OpenStreetMap et popups.
 - `ranked_candidates.png` : graphique de classement des candidats.
 - `report.html` : rapport lisible dans le navigateur avec synthèse, carte et tableau.
 - `run.json` : paramètres et provenance.
 
-Les champs enrichis incluent `priority_class`, `hypothesis`, `review_hint`, `p90_depth_m`, `equiv_diameter_m`, `elongation_ratio`, `bbox_width_m` et `bbox_height_m`.
+Les champs enrichis incluent `priority_class`, `hypothesis`, `review_hint`, `latitude`, `longitude`, `google_maps`, `openstreetmap`, `p90_depth_m`, `equiv_diameter_m`, `elongation_ratio`, `bbox_width_m` et `bbox_height_m`.
+
+La carte `map.png` est une image statique pour inspection. Pour naviguer, zoomer et situer les candidats, ouvrez `interactive_map.html`.
 
 ## Micro-Doppler SAR expérimental
 

@@ -11,7 +11,7 @@ if errorlevel 1 goto error
 if errorlevel 1 goto error
 start "" "%~dp0outputs\demo_lidar"
 echo.
-echo Demo terminee. Le dossier outputs\demo_lidar contient report.html, map.png, candidates.csv, candidates.geojson, candidates.gpkg et les rasters.
+echo Demo terminee. Le dossier outputs\demo_lidar contient interactive_map.html, report.html, map.png, candidate_locations.csv, candidates.geojson, candidates.gpkg et les rasters.
 pause
 exit /b 0
 

@@ -26,8 +26,10 @@ class CaveScanApp(tk.Tk):
         self.python = sys.executable
         self.log_queue: queue.Queue[str] = queue.Queue()
 
-        self.dem_path = tk.StringVar()
-        self.out_dir = tk.StringVar(value=str(self.project_root / "outputs" / "gui_run"))
+        demo_dem = self.project_root / "examples" / "demo_dem.tif"
+        demo_out = self.project_root / "outputs" / "demo_lidar"
+        self.dem_path = tk.StringVar(value=str(demo_dem) if demo_dem.exists() else "")
+        self.out_dir = tk.StringVar(value=str(demo_out))
         self.bbox = tk.StringVar()
         self.min_depth = tk.DoubleVar(value=0.5)
         self.min_area = tk.DoubleVar(value=10.0)
@@ -91,9 +93,12 @@ class CaveScanApp(tk.Tk):
 
         quick = ttk.Frame(right, style="Panel.TFrame")
         quick.pack(fill="x", pady=(0, 12))
-        ttk.Button(quick, text="Rapport HTML", command=self._open_report, style="Quiet.TButton").pack(side="left")
-        ttk.Button(quick, text="Carte PNG", command=self._open_map, style="Quiet.TButton").pack(side="left", padx=8)
-        ttk.Button(quick, text="Dossier résultats", command=self._open_output, style="Quiet.TButton").pack(side="left")
+        ttk.Button(quick, text="Carte interactive", command=self._open_interactive_map, style="Accent.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 8), pady=(0, 8))
+        ttk.Button(quick, text="Liste des lieux", command=self._open_locations, style="Quiet.TButton").grid(row=0, column=1, sticky="ew", pady=(0, 8))
+        ttk.Button(quick, text="Rapport HTML", command=self._open_report, style="Quiet.TButton").grid(row=1, column=0, sticky="ew", padx=(0, 8))
+        ttk.Button(quick, text="Dossier résultats", command=self._open_output, style="Quiet.TButton").grid(row=1, column=1, sticky="ew")
+        quick.columnconfigure(0, weight=1)
+        quick.columnconfigure(1, weight=1)
 
         ttk.Label(right, text="Journal", font=("Segoe UI", 13, "bold"), background="#f8f7f2").pack(anchor="w")
         self.log = tk.Text(
@@ -111,7 +116,8 @@ class CaveScanApp(tk.Tk):
 
         status = ttk.Label(root, textvariable=self.status_text, anchor="w")
         status.pack(fill="x", pady=(10, 0))
-        self._log("Interface prête. Choisis un MNT GeoTIFF ou lance la démo synthétique.")
+        self._log("Interface prête. La démo est déjà chargée si examples/demo_dem.tif existe.")
+        self._log("Clique sur 'Carte interactive' après une analyse pour zoomer et obtenir les coordonnées GPS.")
         self.after(100, self._drain_log_queue)
 
     def _lidar_tab(self, parent: ttk.Notebook) -> ttk.Frame:
@@ -132,7 +138,8 @@ class CaveScanApp(tk.Tk):
         actions.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         ttk.Button(actions, text="Lancer l'analyse", command=self._run_lidar, style="Accent.TButton").pack(side="left")
         ttk.Button(actions, text="Ouvrir les résultats", command=self._open_output, style="Quiet.TButton").pack(side="left", padx=8)
-        ttk.Button(actions, text="Rapport HTML", command=self._open_report, style="Quiet.TButton").pack(side="left")
+        ttk.Button(actions, text="Carte interactive", command=self._open_interactive_map, style="Quiet.TButton").pack(side="left")
+        ttk.Button(actions, text="Rapport HTML", command=self._open_report, style="Quiet.TButton").pack(side="left", padx=8)
 
         frame.columnconfigure(1, weight=1)
         return frame
@@ -148,8 +155,10 @@ class CaveScanApp(tk.Tk):
             wraplength=600,
         ).pack(anchor="w", pady=(0, 12))
         ttk.Button(frame, text="Créer et analyser un MNT de test", command=self._run_demo_dem, style="Accent.TButton").pack(anchor="w")
+        ttk.Button(frame, text="Ouvrir la carte interactive de démo", command=self._open_interactive_map, style="Quiet.TButton").pack(anchor="w", pady=8)
+        ttk.Button(frame, text="Ouvrir la liste des lieux", command=self._open_locations, style="Quiet.TButton").pack(anchor="w")
         ttk.Button(frame, text="Lancer la démo micro-Doppler", command=self._run_microdoppler_demo, style="Quiet.TButton").pack(anchor="w", pady=8)
-        ttk.Button(frame, text="Ouvrir les résultats", command=self._open_output, style="Quiet.TButton").pack(anchor="w")
+        ttk.Button(frame, text="Ouvrir le dossier résultats", command=self._open_output, style="Quiet.TButton").pack(anchor="w")
         return frame
 
     def _catalog_tab(self, parent: ttk.Notebook) -> ttk.Frame:
@@ -201,7 +210,7 @@ class CaveScanApp(tk.Tk):
             16,
             h - 26,
             anchor="w",
-            text="Les vrais résultats: report.html, map.png, candidates.csv, candidates.geojson",
+            text="La carte interactive donne zoom, coordonnées GPS et liens Google Maps",
             fill="#3f3a33",
             font=("Segoe UI", 9),
         )
@@ -332,6 +341,20 @@ class CaveScanApp(tk.Tk):
             webbrowser.open(path.resolve().as_uri())
         else:
             messagebox.showinfo("Rapport absent", "Lance une analyse LiDAR pour générer report.html.")
+
+    def _open_interactive_map(self) -> None:
+        path = self._output_file("interactive_map.html")
+        if path.exists():
+            webbrowser.open(path.resolve().as_uri())
+        else:
+            messagebox.showinfo("Carte absente", "Lance une analyse LiDAR pour générer interactive_map.html.")
+
+    def _open_locations(self) -> None:
+        path = self._output_file("candidate_locations.csv")
+        if path.exists():
+            os.startfile(path)
+        else:
+            messagebox.showinfo("Liste absente", "Lance une analyse LiDAR pour générer candidate_locations.csv.")
 
     def _open_map(self) -> None:
         path = self._output_file("map.png")
