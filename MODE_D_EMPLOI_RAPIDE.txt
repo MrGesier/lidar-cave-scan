@@ -7,6 +7,7 @@ LiDAR Cave Scan - mode d'emploi rapide
 4. Cliquez sur "Carte interactive" pour zoomer, dézoomer et cliquer sur les candidats.
 5. Cliquez sur "Rapport HTML" pour ouvrir report.html dans le navigateur.
 6. Cliquez sur "Liste des lieux" pour ouvrir candidate_locations.csv avec les coordonnées GPS.
+7. Ouvrez l'onglet "Comprendre" dans le logiciel si vous voulez savoir ce que signifient LiDAR, MNT, SAR, Doppler et score.
 
 Si le lancement échoue parce que les dépendances ne sont pas installées :
 
@@ -19,6 +20,7 @@ Données incluses :
 - examples\demo_dem.tif : MNT GeoTIFF synthétique de test
 - outputs\demo_lidar\report.html : rapport de démo déjà généré
 - outputs\demo_lidar\interactive_map.html : carte zoomable avec fond OpenStreetMap
+- outputs\demo_lidar\science_guide.html : explication de la méthode et des études citées
 - outputs\demo_lidar\map.png : carte de démo avec scores et classes
 - outputs\demo_lidar\ranked_candidates.png : graphique de classement
 - outputs\demo_lidar\candidates.csv : table enrichie des candidats

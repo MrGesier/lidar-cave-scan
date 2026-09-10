@@ -13,6 +13,43 @@ from tkinter import filedialog, messagebox
 import tkinter as tk
 from tkinter import ttk
 
+from .science import SCIENCE_SECTIONS, STUDIES
+
+
+class Tooltip:
+    def __init__(self, widget, text: str) -> None:
+        self.widget = widget
+        self.text = text
+        self.tip = None
+        widget.bind("<Enter>", self._show)
+        widget.bind("<Leave>", self._hide)
+
+    def _show(self, _event=None) -> None:
+        if self.tip or not self.text:
+            return
+        x = self.widget.winfo_rootx() + 18
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 8
+        self.tip = tk.Toplevel(self.widget)
+        self.tip.wm_overrideredirect(True)
+        self.tip.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(
+            self.tip,
+            text=self.text,
+            justify="left",
+            wraplength=360,
+            bg="#10201b",
+            fg="#ffffff",
+            padx=10,
+            pady=8,
+            font=("Segoe UI", 9),
+        )
+        label.pack()
+
+    def _hide(self, _event=None) -> None:
+        if self.tip:
+            self.tip.destroy()
+            self.tip = None
+
 
 class CaveScanApp(tk.Tk):
     def __init__(self) -> None:
@@ -82,21 +119,41 @@ class CaveScanApp(tk.Tk):
 
         notebook = ttk.Notebook(left)
         notebook.pack(fill="both", expand=True)
-        notebook.add(self._lidar_tab(notebook), text="Analyse LiDAR")
-        notebook.add(self._demo_tab(notebook), text="Démo")
-        notebook.add(self._catalog_tab(notebook), text="Catalogue SAR")
+        notebook.add(self._lidar_tab(notebook), text="1. Analyser")
+        notebook.add(self._demo_tab(notebook), text="2. Tester")
+        notebook.add(self._understand_tab(notebook), text="Comprendre")
+        notebook.add(self._catalog_tab(notebook), text="SAR")
 
-        ttk.Label(right, text="Aperçu", font=("Segoe UI", 13, "bold"), background="#f8f7f2").pack(anchor="w")
+        ttk.Label(right, text="Ce que tu dois regarder", font=("Segoe UI", 13, "bold"), background="#f8f7f2").pack(anchor="w")
+        guide = ttk.Frame(right, style="Card.TFrame")
+        guide.pack(fill="x", pady=(8, 12))
+        for text in [
+            "1. Lance une analyse ou la démo.",
+            "2. Ouvre la carte interactive pour te situer.",
+            "3. Clique un candidat pour voir coordonnées et liens.",
+            "4. Lis candidate_locations.csv pour trier les lieux.",
+        ]:
+            ttk.Label(guide, text=text, background="#ffffff").pack(anchor="w", pady=2)
+
+        ttk.Label(right, text="Aperçu simplifié", font=("Segoe UI", 13, "bold"), background="#f8f7f2").pack(anchor="w")
         self.preview = tk.Canvas(right, height=310, bg="#fbfaf5", highlightthickness=1, highlightbackground="#c9c1b2")
         self.preview.pack(fill="x", pady=(8, 14))
         self._draw_preview()
 
         quick = ttk.Frame(right, style="Panel.TFrame")
         quick.pack(fill="x", pady=(0, 12))
-        ttk.Button(quick, text="Carte interactive", command=self._open_interactive_map, style="Accent.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 8), pady=(0, 8))
-        ttk.Button(quick, text="Liste des lieux", command=self._open_locations, style="Quiet.TButton").grid(row=0, column=1, sticky="ew", pady=(0, 8))
-        ttk.Button(quick, text="Rapport HTML", command=self._open_report, style="Quiet.TButton").grid(row=1, column=0, sticky="ew", padx=(0, 8))
-        ttk.Button(quick, text="Dossier résultats", command=self._open_output, style="Quiet.TButton").grid(row=1, column=1, sticky="ew")
+        map_button = ttk.Button(quick, text="Carte interactive", command=self._open_interactive_map, style="Accent.TButton")
+        map_button.grid(row=0, column=0, sticky="ew", padx=(0, 8), pady=(0, 8))
+        Tooltip(map_button, "Ouvre interactive_map.html: c'est la carte à utiliser pour zoomer, dézoomer et cliquer sur les candidats.")
+        locations_button = ttk.Button(quick, text="Liste des lieux", command=self._open_locations, style="Quiet.TButton")
+        locations_button.grid(row=0, column=1, sticky="ew", pady=(0, 8))
+        Tooltip(locations_button, "Ouvre candidate_locations.csv avec latitude, longitude et liens Google Maps/OpenStreetMap.")
+        report_button = ttk.Button(quick, text="Rapport HTML", command=self._open_report, style="Quiet.TButton")
+        report_button.grid(row=1, column=0, sticky="ew", padx=(0, 8))
+        Tooltip(report_button, "Ouvre un rapport lisible avec carte, tableau, interprétation et limites.")
+        folder_button = ttk.Button(quick, text="Dossier résultats", command=self._open_output, style="Quiet.TButton")
+        folder_button.grid(row=1, column=1, sticky="ew")
+        Tooltip(folder_button, "Ouvre le dossier qui contient tous les fichiers produits par l'analyse.")
         quick.columnconfigure(0, weight=1)
         quick.columnconfigure(1, weight=1)
 
@@ -122,24 +179,45 @@ class CaveScanApp(tk.Tk):
 
     def _lidar_tab(self, parent: ttk.Notebook) -> ttk.Frame:
         frame = ttk.Frame(parent, padding=14)
-        self._path_row(frame, "MNT GeoTIFF", self.dem_path, self._choose_dem, 0)
-        self._path_row(frame, "Dossier de sortie", self.out_dir, self._choose_out_dir, 1)
+        intro = ttk.Frame(frame, style="Card.TFrame")
+        intro.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 12))
+        ttk.Label(
+            intro,
+            text="Analyse LiDAR en 3 étapes",
+            font=("Segoe UI", 12, "bold"),
+            background="#ffffff",
+        ).pack(anchor="w")
+        ttk.Label(
+            intro,
+            text="Choisis un MNT GeoTIFF, lance l'analyse, puis ouvre la carte interactive pour localiser les candidats.",
+            wraplength=640,
+            background="#ffffff",
+        ).pack(anchor="w", pady=(4, 0))
+        self._path_row(frame, "MNT GeoTIFF", self.dem_path, self._choose_dem, 1, "Le MNT est une grille d'altitudes. Il doit être géoréférencé pour obtenir de vraies coordonnées GPS.")
+        self._path_row(frame, "Dossier de sortie", self.out_dir, self._choose_out_dir, 2, "Le dossier où seront générés la carte, le rapport, les CSV et les rasters.")
 
-        ttk.Label(frame, text="BBox optionnelle (XMIN YMIN XMAX YMAX)").grid(row=2, column=0, sticky="w", pady=8)
-        ttk.Entry(frame, textvariable=self.bbox).grid(row=2, column=1, sticky="ew", padx=(10, 6), pady=8)
+        bbox_label = ttk.Label(frame, text="BBox optionnelle (XMIN YMIN XMAX YMAX)")
+        bbox_label.grid(row=3, column=0, sticky="w", pady=8)
+        Tooltip(bbox_label, "Zone à découper dans les coordonnées du raster, souvent Lambert-93 en France. Laisse vide pour analyser tout le GeoTIFF.")
+        bbox_entry = ttk.Entry(frame, textvariable=self.bbox)
+        bbox_entry.grid(row=3, column=1, sticky="ew", padx=(10, 6), pady=8)
+        Tooltip(bbox_entry, "Exemple Lambert-93: 420000 6242800 420240 6243000. Ne mets pas latitude/longitude ici.")
 
         params = ttk.Frame(frame)
-        params.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 12))
-        self._number_field(params, "Profondeur min. (m)", self.min_depth, 0)
-        self._number_field(params, "Surface min. (m²)", self.min_area, 1)
-        self._number_field(params, "Surface max. (m²)", self.max_area, 2)
+        params.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(8, 12))
+        self._number_field(params, "Profondeur min. (m)", self.min_depth, 0, "Ignore les cuvettes moins profondes que ce seuil.")
+        self._number_field(params, "Surface min. (m²)", self.min_area, 1, "Ignore les micro-formes trop petites ou bruyantes.")
+        self._number_field(params, "Surface max. (m²)", self.max_area, 2, "Ignore les très grands bassins qui sont rarement des indices locaux.")
 
         actions = ttk.Frame(frame)
-        actions.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(10, 0))
-        ttk.Button(actions, text="Lancer l'analyse", command=self._run_lidar, style="Accent.TButton").pack(side="left")
-        ttk.Button(actions, text="Ouvrir les résultats", command=self._open_output, style="Quiet.TButton").pack(side="left", padx=8)
-        ttk.Button(actions, text="Carte interactive", command=self._open_interactive_map, style="Quiet.TButton").pack(side="left")
+        actions.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        run_btn = ttk.Button(actions, text="Lancer l'analyse", command=self._run_lidar, style="Accent.TButton")
+        run_btn.pack(side="left")
+        Tooltip(run_btn, "Calcule les dépressions candidates et génère tous les fichiers de sortie.")
+        ttk.Button(actions, text="Carte interactive", command=self._open_interactive_map, style="Quiet.TButton").pack(side="left", padx=8)
+        ttk.Button(actions, text="Liste des lieux", command=self._open_locations, style="Quiet.TButton").pack(side="left")
         ttk.Button(actions, text="Rapport HTML", command=self._open_report, style="Quiet.TButton").pack(side="left", padx=8)
+        ttk.Button(actions, text="Dossier", command=self._open_output, style="Quiet.TButton").pack(side="left")
 
         frame.columnconfigure(1, weight=1)
         return frame
@@ -161,6 +239,33 @@ class CaveScanApp(tk.Tk):
         ttk.Button(frame, text="Ouvrir le dossier résultats", command=self._open_output, style="Quiet.TButton").pack(anchor="w")
         return frame
 
+    def _understand_tab(self, parent: ttk.Notebook) -> ttk.Frame:
+        frame = ttk.Frame(parent, padding=14)
+        canvas = tk.Canvas(frame, bg="#f8f7f2", highlightthickness=0)
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+        content = ttk.Frame(canvas, style="Panel.TFrame")
+        content.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=content, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        ttk.Label(content, text="Comprendre l'outil", font=("Segoe UI", 15, "bold"), background="#f8f7f2").pack(anchor="w", pady=(0, 8))
+        for item in SCIENCE_SECTIONS:
+            box = ttk.Frame(content, style="Card.TFrame")
+            box.pack(fill="x", pady=6)
+            ttk.Label(box, text=item["title"], font=("Segoe UI", 11, "bold"), background="#ffffff").pack(anchor="w")
+            ttk.Label(box, text=item["body"], wraplength=680, background="#ffffff").pack(anchor="w", pady=(3, 0))
+
+        sources = ttk.Frame(content, style="Card.TFrame")
+        sources.pack(fill="x", pady=(12, 6))
+        ttk.Label(sources, text="Études et sources", font=("Segoe UI", 11, "bold"), background="#ffffff").pack(anchor="w")
+        for study in STUDIES:
+            ttk.Label(sources, text=f"- {study['label']}", wraplength=680, background="#ffffff").pack(anchor="w", pady=(6, 0))
+            ttk.Label(sources, text=study["note"], wraplength=680, background="#ffffff", foreground="#4a5550").pack(anchor="w")
+        ttk.Button(sources, text="Ouvrir le guide complet", command=self._open_science_guide, style="Quiet.TButton").pack(anchor="w", pady=(10, 0))
+        return frame
+
     def _catalog_tab(self, parent: ttk.Notebook) -> ttk.Frame:
         frame = ttk.Frame(parent, padding=14)
         ttk.Label(frame, text="BBox WGS84 (WEST SOUTH EAST NORTH)").grid(row=0, column=0, sticky="w", pady=8)
@@ -175,16 +280,26 @@ class CaveScanApp(tk.Tk):
         frame.columnconfigure(1, weight=1)
         return frame
 
-    def _path_row(self, frame, label, variable, command, row):
-        ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", pady=8)
-        ttk.Entry(frame, textvariable=variable).grid(row=row, column=1, sticky="ew", padx=(10, 6), pady=8)
-        ttk.Button(frame, text="Parcourir", command=command).grid(row=row, column=2, sticky="e", pady=8)
+    def _path_row(self, frame, label, variable, command, row, tip):
+        label_widget = ttk.Label(frame, text=label)
+        label_widget.grid(row=row, column=0, sticky="w", pady=8)
+        Tooltip(label_widget, tip)
+        entry = ttk.Entry(frame, textvariable=variable)
+        entry.grid(row=row, column=1, sticky="ew", padx=(10, 6), pady=8)
+        Tooltip(entry, tip)
+        button = ttk.Button(frame, text="Parcourir", command=command)
+        button.grid(row=row, column=2, sticky="e", pady=8)
+        Tooltip(button, "Choisir le fichier ou dossier sur ton PC.")
 
-    def _number_field(self, frame, label, variable, column):
+    def _number_field(self, frame, label, variable, column, tip):
         group = ttk.Frame(frame)
         group.grid(row=0, column=column, sticky="ew", padx=(0, 10))
-        ttk.Label(group, text=label).pack(anchor="w")
-        ttk.Entry(group, textvariable=variable, width=14).pack(anchor="w", pady=(4, 0))
+        label_widget = ttk.Label(group, text=label)
+        label_widget.pack(anchor="w")
+        Tooltip(label_widget, tip)
+        entry = ttk.Entry(group, textvariable=variable, width=14)
+        entry.pack(anchor="w", pady=(4, 0))
+        Tooltip(entry, tip)
         frame.columnconfigure(column, weight=1)
 
     def _draw_preview(self) -> None:
@@ -355,6 +470,22 @@ class CaveScanApp(tk.Tk):
             os.startfile(path)
         else:
             messagebox.showinfo("Liste absente", "Lance une analyse LiDAR pour générer candidate_locations.csv.")
+
+    def _open_science_guide(self) -> None:
+        path = self._output_file("science_guide.html")
+        if not path.exists():
+            try:
+                from .science import write_science_guide
+
+                target = Path(self.out_dir.get())
+                if target.suffix:
+                    target = target.parent
+                target.mkdir(parents=True, exist_ok=True)
+                write_science_guide(target)
+            except Exception as exc:
+                messagebox.showerror("Guide absent", f"Impossible de créer le guide : {exc}")
+                return
+        webbrowser.open(path.resolve().as_uri())
 
     def _open_map(self) -> None:
         path = self._output_file("map.png")

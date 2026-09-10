@@ -9,6 +9,8 @@ import math
 from pathlib import Path
 from typing import Sequence
 
+from .science import write_science_guide
+
 
 def priority_class(score: float) -> str:
     """Return a practical review class from the heuristic terrain score."""
@@ -455,6 +457,7 @@ def write_report(out: Path, candidates, run_metadata: dict) -> None:
     <section class="panel">
       <h2>Fichiers produits</h2>
       <p><a href="interactive_map.html">interactive_map.html</a> · <a href="candidate_locations.csv">candidate_locations.csv</a> · <a href="candidates.csv">candidates.csv</a> · <a href="candidates.geojson">candidates.geojson</a> · <a href="candidates.gpkg">candidates.gpkg</a> · <a href="ranked_candidates.png">ranked_candidates.png</a></p>
+      <p><a href="science_guide.html">Comprendre l'outil et les limites scientifiques</a></p>
     </section>
   </main>
 </body>
@@ -637,6 +640,7 @@ def run_lidar_scan(
     }
     (out / "run.json").write_text(json.dumps(run_metadata, indent=2, ensure_ascii=False), encoding="utf-8")
     write_interactive_map(out, candidates)
+    write_science_guide(out)
     write_report(out, candidates, run_metadata)
     print(f"{len(candidates)} candidats. Resultats : {out.resolve()}")
     return out

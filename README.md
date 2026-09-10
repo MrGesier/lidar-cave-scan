@@ -87,6 +87,10 @@ python app.py gui
 
 L'interface permet de choisir un GeoTIFF, régler les seuils, lancer l'analyse, ouvrir le dossier de résultats, créer un MNT de test et lancer la démo micro-Doppler.
 
+Pour comprendre l'outil, ouvrez l'onglet `Comprendre`. Il explique LiDAR, MNT, score, carte interactive, SAR, Doppler, micro-Doppler, limites et études citées. Les principaux boutons ont aussi des bulles d'aide au survol.
+
+Pour trouver les lieux sur une carte, utilisez `Carte interactive`, pas seulement `map.png`. La carte interactive permet de zoomer, cliquer sur les candidats et ouvrir chaque point dans Google Maps ou OpenStreetMap.
+
 ## Tester avec un MNT synthétique
 
 Pour voir l'outil sans télécharger immédiatement une dalle LiDAR :
@@ -141,6 +145,7 @@ python app.py lidar --dem "C:\data\mnt.tif" --geology "C:\data\calcaires.gpkg" -
 - `interactive_map.html` : carte zoomable/dézoomable avec fond OpenStreetMap et popups.
 - `ranked_candidates.png` : graphique de classement des candidats.
 - `report.html` : rapport lisible dans le navigateur avec synthèse, carte et tableau.
+- `science_guide.html` : explication synthétique de la méthode, du SAR/Doppler et des limites.
 - `run.json` : paramètres et provenance.
 
 Les champs enrichis incluent `priority_class`, `hypothesis`, `review_hint`, `latitude`, `longitude`, `google_maps`, `openstreetmap`, `p90_depth_m`, `equiv_diameter_m`, `elongation_ratio`, `bbox_width_m` et `bbox_height_m`.
