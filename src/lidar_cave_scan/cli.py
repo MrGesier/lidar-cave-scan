@@ -20,6 +20,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    gui = subparsers.add_parser(
+        "gui",
+        help="Open the Windows desktop interface.",
+    )
+    gui.set_defaults(handler=_run_gui)
+
     lidar = subparsers.add_parser(
         "lidar",
         help="Analyze a metric LiDAR DEM GeoTIFF for closed surface depressions.",
@@ -65,6 +71,13 @@ def build_parser() -> argparse.ArgumentParser:
     catalog.set_defaults(handler=_run_catalog)
 
     return parser
+
+
+def _run_gui(args: argparse.Namespace) -> int:
+    from .gui import main as gui_main
+
+    gui_main()
+    return 0
 
 
 def _run_lidar(args: argparse.Namespace) -> int:

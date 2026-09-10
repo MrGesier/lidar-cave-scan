@@ -20,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 lidar-cave-scan = "lidar_cave_scan.cli:main"
+lidar-cave-scan-gui = "lidar_cave_scan.gui:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

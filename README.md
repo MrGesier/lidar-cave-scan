@@ -12,14 +12,22 @@ Important : cet outil ne détecte pas directement les grottes, ne voit pas sous 
 - Croisement facultatif avec géologie, cavités connues et failles.
 - Démo micro-Doppler SAR sur données synthétiques.
 - Recherche de métadonnées publiques Sentinel-1 SLC via le catalogue STAC Copernicus.
+- Interface desktop Windows avec boutons de lancement et journal d'exécution.
+- Générateur de MNT synthétique pour tester l'outil sans données externes.
 
 ## Structure
 
 ```text
 .
 ├── app.py
+├── desktop_app.py
+├── run_desktop.bat
+├── install_windows.bat
+├── examples/
+│   └── create_demo_dem.py
 ├── src/lidar_cave_scan/
 │   ├── cli.py
+│   ├── gui.py
 │   ├── lidar.py
 │   ├── microdoppler.py
 │   └── catalog.py
@@ -33,6 +41,14 @@ Important : cet outil ne détecte pas directement les grottes, ne voit pas sous 
 ## Installation locale
 
 Python 3.11 ou 3.12 est recommandé.
+
+Sur Windows, le plus simple est de double-cliquer sur :
+
+```text
+install_windows.bat
+```
+
+Le script crée `.venv` puis installe l'application et ses dépendances.
 
 ```powershell
 python -m venv .venv
@@ -48,6 +64,41 @@ conda create -n lidar-cave-scan -c conda-forge python=3.12 numpy scipy rasterio 
 conda activate lidar-cave-scan
 python -m pip install -e .
 ```
+
+## Lancer le logiciel
+
+Après installation, double-cliquez sur :
+
+```text
+run_desktop.bat
+```
+
+Ou lancez-le en ligne de commande :
+
+```powershell
+python app.py gui
+```
+
+L'interface permet de choisir un GeoTIFF, régler les seuils, lancer l'analyse, ouvrir le dossier de résultats, créer un MNT de test et lancer la démo micro-Doppler.
+
+## Tester avec un MNT synthétique
+
+Pour voir l'outil sans télécharger immédiatement une dalle LiDAR :
+
+```powershell
+python examples\create_demo_dem.py --out examples\demo_dem.tif
+python app.py lidar --dem examples\demo_dem.tif --out outputs\demo_lidar
+```
+
+Dans l'interface desktop, utilisez directement le bouton `Créer et analyser un MNT de test`.
+
+Vous pouvez aussi double-cliquer sur :
+
+```text
+run_demo.bat
+```
+
+Ce script génère le GeoTIFF de test, lance l'analyse et ouvre automatiquement `outputs\demo_lidar`.
 
 ## Analyse LiDAR
 
