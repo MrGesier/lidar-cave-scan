@@ -43,6 +43,16 @@ def build_parser() -> argparse.ArgumentParser:
     lidar.add_argument("--min-area", type=float, default=10.0)
     lidar.add_argument("--max-area", type=float, default=10000.0)
     lidar.add_argument("--max-cells", type=int, default=4000000)
+    lidar.add_argument(
+        "--detect-singularities",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Also detect local morphometric anomalies beyond closed depressions.",
+    )
+    lidar.add_argument("--singularity-z", type=float, default=2.4, help="Robust z-score threshold for anomaly detection.")
+    lidar.add_argument("--singularity-min-area", type=float, default=8.0, help="Minimum area for singularity patches.")
+    lidar.add_argument("--singularity-max-area", type=float, default=2500.0, help="Maximum area for singularity patches.")
+    lidar.add_argument("--smooth-sigma", type=float, default=6.0, help="Gaussian smoothing radius, in pixels, for local terrain residuals.")
     lidar.add_argument("--geology", help="Optional pre-filtered karst geology vector layer.")
     lidar.add_argument("--cavities", help="Optional known cavities vector layer.")
     lidar.add_argument("--faults", help="Optional faults vector layer.")
@@ -94,6 +104,11 @@ def _run_lidar(args: argparse.Namespace) -> int:
         geology=args.geology,
         cavities=args.cavities,
         faults=args.faults,
+        include_singularities=args.detect_singularities,
+        singularity_z=args.singularity_z,
+        singularity_min_area=args.singularity_min_area,
+        singularity_max_area=args.singularity_max_area,
+        smooth_sigma=args.smooth_sigma,
     )
     return 0
 

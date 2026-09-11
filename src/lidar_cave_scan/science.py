@@ -47,6 +47,16 @@ SCIENCE_SECTIONS = [
         ),
     },
     {
+        "title": "Singularites terrain",
+        "body": (
+            "Une singularite est une forme locale qui s'ecarte de la tendance du terrain autour "
+            "d'elle: petit creux, bosse, rupture, texture rugueuse ou artefact. L'outil calcule un "
+            "residu local et un score z robuste pour remonter ces zones. C'est volontairement plus "
+            "audacieux que la detection de cuvettes fermees, donc il faut s'attendre a plus de faux "
+            "positifs."
+        ),
+    },
+    {
         "title": "Carte interactive",
         "body": (
             "interactive_map.html est la carte a utiliser pour se situer. Elle permet de zoomer, "

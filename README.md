@@ -8,6 +8,7 @@ Important : cet outil ne détecte pas directement les grottes, ne voit pas sous 
 
 - Analyse d'un MNT LiDAR GeoTIFF en CRS projeté métrique.
 - Détection de dépressions fermées par remplissage priority-flood.
+- Détection exploratoire de singularités morphologiques : creux locaux, bosses, ruptures et textures atypiques.
 - Export de rasters, GeoPackage, CSV, carte PNG et métadonnées JSON.
 - Croisement facultatif avec géologie, cavités connues et failles.
 - Démo micro-Doppler SAR sur données synthétiques.
@@ -85,11 +86,11 @@ Ou lancez-le en ligne de commande :
 python app.py gui
 ```
 
-L'interface permet de choisir un GeoTIFF, régler les seuils, lancer l'analyse, ouvrir le dossier de résultats, créer un MNT de test et lancer la démo micro-Doppler.
+L'interface permet de choisir un GeoTIFF, régler les seuils, lancer l'analyse, ouvrir le dossier de résultats, créer un MNT de test et lancer la démo micro-Doppler. Le menu `Mode d'inspection` règle rapidement le niveau de tri : `Prudent` limite les faux positifs, `Standard` équilibre le bruit, `Audacieux` remonte plus de singularités à inspecter.
 
-Pour comprendre l'outil, ouvrez l'onglet `Comprendre`. Il explique LiDAR, MNT, score, carte interactive, SAR, Doppler, micro-Doppler, limites et études citées. Les principaux boutons ont aussi des bulles d'aide au survol.
+Pour comprendre l'outil, ouvrez l'onglet `Comprendre`. Il explique LiDAR, MNT, score, singularités terrain, carte interactive, SAR, Doppler, micro-Doppler, limites et études citées. Les principaux boutons ont aussi des bulles d'aide au survol.
 
-Pour trouver les lieux sur une carte, utilisez `Carte interactive`, pas seulement `map.png`. La carte interactive permet de zoomer, cliquer sur les candidats et ouvrir chaque point dans Google Maps ou OpenStreetMap.
+Pour trouver les lieux sur une carte, utilisez `Carte interactive`, pas seulement `map.png`. La carte interactive permet de zoomer, cliquer sur les candidats ou les singularités et ouvrir chaque point dans Google Maps ou OpenStreetMap.
 
 ## Tester avec un MNT synthétique
 
@@ -124,6 +125,12 @@ Avec une emprise métrique :
 python app.py lidar --dem "C:\data\mnt.tif" --bbox 421000 6242000 422000 6243000 --min-depth 0.5 --min-area 10 --max-area 10000 --out outputs\barzun
 ```
 
+Mode plus audacieux, avec singularités plus sensibles :
+
+```powershell
+python app.py lidar --dem "C:\data\mnt.tif" --out outputs\barzun_audacieux --min-depth 0.25 --min-area 5 --singularity-z 1.8 --singularity-min-area 4 --smooth-sigma 5
+```
+
 ### Couches facultatives
 
 Les couches vectorielles doivent avoir un CRS défini. La couche géologique doit déjà être filtrée sur les lithologies pertinentes.
@@ -137,18 +144,28 @@ python app.py lidar --dem "C:\data\mnt.tif" --geology "C:\data\calcaires.gpkg" -
 - `fill_depth.tif` : profondeur de remplissage en mètres.
 - `slope_deg.tif` : pente en degrés.
 - `candidate_ids.tif` : identifiants raster des dépressions conservées.
+- `terrain_residual.tif` : écart entre le terrain et sa tendance locale.
+- `terrain_anomaly_z.tif` : score z robuste du résidu local.
+- `singularity_ids.tif` : identifiants raster des singularités conservées.
 - `candidates.gpkg` : polygones et attributs pour QGIS.
+- `singularities.gpkg` : polygones de singularités morphologiques pour QGIS.
 - `candidates.geojson` : version GeoJSON pour webmapping ou outils SIG légers.
+- `singularities.geojson` : version GeoJSON des singularités.
 - `candidates.csv` : table lisible dans Excel/QGIS.
+- `singularities.csv` : table des singularités, scores, types et mesures.
 - `candidate_locations.csv` : coordonnées GPS, liens Google Maps/OpenStreetMap et résumé terrain.
+- `singularity_locations.csv` : coordonnées GPS et liens des singularités.
 - `map.png` : carte d'inspection avec ombrage, contours, classes et scores.
+- `singularity_map.png` : carte technique du résidu local normalisé.
 - `interactive_map.html` : carte zoomable/dézoomable avec fond OpenStreetMap et popups.
 - `ranked_candidates.png` : graphique de classement des candidats.
 - `report.html` : rapport lisible dans le navigateur avec synthèse, carte et tableau.
 - `science_guide.html` : explication synthétique de la méthode, du SAR/Doppler et des limites.
 - `run.json` : paramètres et provenance.
 
-Les champs enrichis incluent `priority_class`, `hypothesis`, `review_hint`, `latitude`, `longitude`, `google_maps`, `openstreetmap`, `p90_depth_m`, `equiv_diameter_m`, `elongation_ratio`, `bbox_width_m` et `bbox_height_m`.
+Les champs enrichis des candidats incluent `priority_class`, `hypothesis`, `review_hint`, `latitude`, `longitude`, `google_maps`, `openstreetmap`, `p90_depth_m`, `equiv_diameter_m`, `elongation_ratio`, `bbox_width_m` et `bbox_height_m`.
+
+Les champs des singularités incluent `singularity_class`, `singularity_score`, `singularity_type`, `abs_residual_m`, `abs_z_max`, `roughness_m`, `hypothesis`, `review_hint`, `latitude`, `longitude`, `google_maps` et `openstreetmap`.
 
 La carte `map.png` est une image statique pour inspection. Pour naviguer, zoomer et situer les candidats, ouvrez `interactive_map.html`.
 

@@ -4,10 +4,15 @@ LiDAR Cave Scan - mode d'emploi rapide
 1. Double-cliquez sur LANCER_LIDAR_CAVE_SCAN.bat
 2. Pour tester sans données externes, ouvrez l'onglet Demo.
 3. Cliquez sur "Créer et analyser un MNT de test".
-4. Cliquez sur "Carte interactive" pour zoomer, dézoomer et cliquer sur les candidats.
-5. Cliquez sur "Rapport HTML" pour ouvrir report.html dans le navigateur.
-6. Cliquez sur "Liste des lieux" pour ouvrir candidate_locations.csv avec les coordonnées GPS.
-7. Ouvrez l'onglet "Comprendre" dans le logiciel si vous voulez savoir ce que signifient LiDAR, MNT, SAR, Doppler et score.
+4. Dans l'onglet Analyse, choisissez le mode Prudent, Standard ou Audacieux.
+   - Prudent : moins de faux positifs.
+   - Standard : équilibre.
+   - Audacieux : plus de singularités à trier.
+5. Cliquez sur "Carte interactive" pour zoomer, dézoomer et cliquer sur les candidats ou singularités.
+6. Cliquez sur "Rapport HTML" pour ouvrir report.html dans le navigateur.
+7. Cliquez sur "Liste des lieux" pour ouvrir candidate_locations.csv avec les coordonnées GPS.
+8. Cliquez sur "Liste singularités" pour ouvrir singularity_locations.csv.
+9. Ouvrez l'onglet "Comprendre" dans le logiciel si vous voulez savoir ce que signifient LiDAR, MNT, singularités, SAR, Doppler et score.
 
 Si le lancement échoue parce que les dépendances ne sont pas installées :
 
@@ -22,10 +27,14 @@ Données incluses :
 - outputs\demo_lidar\interactive_map.html : carte zoomable avec fond OpenStreetMap
 - outputs\demo_lidar\science_guide.html : explication de la méthode et des études citées
 - outputs\demo_lidar\map.png : carte de démo avec scores et classes
+- outputs\demo_lidar\singularity_map.png : carte technique des singularités terrain
 - outputs\demo_lidar\ranked_candidates.png : graphique de classement
 - outputs\demo_lidar\candidates.csv : table enrichie des candidats
 - outputs\demo_lidar\candidate_locations.csv : coordonnées et liens Google Maps/OpenStreetMap
+- outputs\demo_lidar\singularities.csv : table des singularités détectées
+- outputs\demo_lidar\singularity_locations.csv : coordonnées et liens des singularités
 - outputs\demo_lidar\candidates.geojson : export SIG léger
 
 Important : l'outil présélectionne des dépressions de surface. Il ne confirme pas des grottes et ne voit pas sous terre.
+Important aussi : les singularités sont des formes atypiques du relief. Elles servent à élargir le balayage, pas à annoncer une découverte.
 Important aussi : les coordonnées de la démo sont synthétiques. Avec un vrai MNT GeoTIFF géoréférencé, les coordonnées viennent du raster chargé.

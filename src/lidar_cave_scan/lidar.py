@@ -66,6 +66,42 @@ def review_hint(row) -> str:
     return "Signal faible: conserver comme bruit potentiel ou controle secondaire."
 
 
+def singularity_class(score: float) -> str:
+    """Return an exploratory class for local terrain singularities."""
+    if score >= 80:
+        return "S1 - anomalie forte"
+    if score >= 60:
+        return "S2 - anomalie nette"
+    if score >= 40:
+        return "S3 - signal discret"
+    return "S4 - bruit probable"
+
+
+def singularity_hypothesis(row) -> str:
+    parts = [str(row.get("singularity_type", "forme locale atypique"))]
+    if row.get("abs_z_max", 0) >= 4:
+        parts.append("contraste topographique fort")
+    elif row.get("abs_z_max", 0) >= 2.8:
+        parts.append("contraste topographique net")
+    if row.get("roughness_m", 0) >= 0.7:
+        parts.append("texture rugueuse")
+    if row.get("area_m2", 0) <= 40:
+        parts.append("objet tres local")
+    elif row.get("area_m2", 0) >= 400:
+        parts.append("forme etendue")
+    return ", ".join(parts)
+
+
+def singularity_review_hint(row) -> str:
+    if row.get("singularity_score", 0) >= 80:
+        return "Priorite: comparer ombrages, orthophoto et traces humaines avant terrain."
+    if row.get("singularity_score", 0) >= 60:
+        return "A controler: verifier si le signal suit une rupture naturelle ou un artefact."
+    if row.get("singularity_score", 0) >= 40:
+        return "Signal utile en balayage large, a confirmer avec d'autres couches."
+    return "Conserver comme bruit possible, sauf contexte geologique coherent."
+
+
 def fill_depressions(dem, valid):
     """Priority-flood fill, seeded at raster edges and nodata boundaries."""
     import numpy as np
@@ -222,6 +258,173 @@ def detect(dem, valid, transform, crs, min_depth=0.5, min_area=10, max_area=1000
     return filled, depth, ids, gdf
 
 
+def detect_singularities(
+    dem,
+    valid,
+    transform,
+    crs,
+    smooth_sigma: float = 6.0,
+    z_threshold: float = 2.4,
+    min_area: float = 8.0,
+    max_area: float = 2500.0,
+):
+    """Detect local morphometric outliers that are not necessarily closed basins."""
+    import geopandas as gpd
+    import numpy as np
+    import rasterio
+    from rasterio.features import shapes
+    from rasterio.windows import Window
+    from scipy import ndimage as ndi
+    from shapely.geometry import shape
+    from shapely.ops import unary_union
+
+    def robust_z(values, array):
+        values = values[np.isfinite(values)]
+        if not len(values):
+            return np.zeros_like(array, dtype=np.float64)
+        median = float(np.median(values))
+        mad = float(np.median(np.abs(values - median)))
+        scale = 1.4826 * mad
+        if not np.isfinite(scale) or scale < 1e-9:
+            scale = float(np.std(values))
+        if not np.isfinite(scale) or scale < 1e-9:
+            scale = 1.0
+        return (array - median) / scale
+
+    pixel_area = abs(transform.a * transform.e)
+    dx = abs(transform.a)
+    dy = abs(transform.e)
+    fill_value = float(np.median(dem[valid])) if np.any(valid) else 0.0
+    safe = np.where(valid, dem, fill_value)
+    sigma = max(float(smooth_sigma), 1.0)
+
+    smooth = ndi.gaussian_filter(safe, sigma=sigma)
+    residual = np.where(valid, dem - smooth, 0.0)
+    residual_z = np.where(valid, robust_z(residual[valid], residual), 0.0)
+
+    window_size = max(3, int(round(sigma * 2)) | 1)
+    local_mean = ndi.uniform_filter(safe, size=window_size)
+    local_sq_mean = ndi.uniform_filter(safe * safe, size=window_size)
+    roughness = np.where(valid, np.sqrt(np.maximum(local_sq_mean - local_mean * local_mean, 0)), 0.0)
+    roughness_z = np.where(valid, robust_z(roughness[valid], roughness), 0.0)
+
+    gy, gx = np.gradient(safe, dy, dx)
+    gyy, _ = np.gradient(gy, dy, dx)
+    _, gxx = np.gradient(gx, dy, dx)
+    curvature = np.where(valid, gxx + gyy, 0.0)
+    curvature_z = np.where(valid, robust_z(curvature[valid], curvature), 0.0)
+
+    min_residual = max(0.08, float(np.nanstd(residual[valid])) * 0.35) if np.any(valid) else 0.08
+    anomaly_mask = valid & (
+        ((np.abs(residual_z) >= z_threshold) & (np.abs(residual) >= min_residual))
+        | ((np.abs(curvature_z) >= z_threshold + 0.5) & (roughness_z >= 0.8))
+    )
+    anomaly_mask = ndi.binary_opening(anomaly_mask, structure=np.ones((2, 2)))
+    anomaly_mask = ndi.binary_closing(anomaly_mask, structure=np.ones((3, 3)))
+
+    labels, _ = ndi.label(anomaly_mask, structure=np.ones((3, 3)))
+    objects = ndi.find_objects(labels)
+    records = []
+    ids = np.zeros(dem.shape, dtype=np.int32)
+    rough_reference = float(np.nanmedian(roughness[valid])) if np.any(valid) else 0.0
+
+    for label_id, sl in enumerate(objects, 1):
+        if sl is None:
+            continue
+        local = labels[sl] == label_id
+        cell_count = int(np.count_nonzero(local))
+        area = cell_count * pixel_area
+        if area < min_area or area > max_area:
+            continue
+
+        local_residual = residual[sl][local]
+        local_z = residual_z[sl][local]
+        local_roughness = roughness[sl][local]
+        local_curvature_z = curvature_z[sl][local]
+        abs_z_max = float(np.max(np.abs(local_z)))
+        if abs_z_max < z_threshold and float(np.max(np.abs(local_curvature_z))) < z_threshold + 0.5:
+            continue
+
+        local_transform = rasterio.windows.transform(
+            Window(sl[1].start, sl[0].start, sl[1].stop - sl[1].start, sl[0].stop - sl[0].start),
+            transform,
+        )
+        polygon_parts = [
+            shape(geometry)
+            for geometry, value in shapes(local.astype("uint8"), mask=local, transform=local_transform)
+            if value == 1
+        ]
+        geom = unary_union(polygon_parts)
+        perimeter = geom.length
+        circularity = float(4 * math.pi * geom.area / perimeter**2) if perimeter else 0.0
+        min_res = float(np.min(local_residual))
+        max_res = float(np.max(local_residual))
+        abs_residual = max(abs(min_res), abs(max_res))
+        rough_mean = float(np.mean(local_roughness))
+
+        if abs(min_res) > abs(max_res) * 1.25:
+            kind = "creux local atypique"
+        elif abs(max_res) > abs(min_res) * 1.25:
+            kind = "relief positif atypique"
+        else:
+            kind = "rupture ou texture mixte"
+
+        rough_factor = rough_mean / max(rough_reference * 2, 0.05)
+        score = min(
+            100,
+            round(
+                32 * min(abs_z_max / max(z_threshold * 2.2, 1), 1)
+                + 24 * min(abs_residual / 1.2, 1)
+                + 18 * min(area / 350, 1)
+                + 14 * min(rough_factor, 1)
+                + 12 * min(circularity, 1)
+            ),
+        )
+        row = {
+            "id": len(records) + 1,
+            "area_m2": round(area, 2),
+            "singularity_type": kind,
+            "singularity_score": int(score),
+            "singularity_class": singularity_class(score),
+            "residual_min_m": round(min_res, 3),
+            "residual_max_m": round(max_res, 3),
+            "abs_residual_m": round(abs_residual, 3),
+            "abs_z_max": round(abs_z_max, 2),
+            "roughness_m": round(rough_mean, 3),
+            "curvature_z_max": round(float(np.max(np.abs(local_curvature_z))), 2),
+            "circularity": round(circularity, 3),
+            "x": round(geom.centroid.x, 3),
+            "y": round(geom.centroid.y, 3),
+            "geometry": geom,
+        }
+        row["hypothesis"] = singularity_hypothesis(row)
+        row["review_hint"] = singularity_review_hint(row)
+        records.append(row)
+        ids[sl][local] = row["id"]
+
+    columns = [
+        "id",
+        "area_m2",
+        "singularity_type",
+        "singularity_score",
+        "singularity_class",
+        "residual_min_m",
+        "residual_max_m",
+        "abs_residual_m",
+        "abs_z_max",
+        "roughness_m",
+        "curvature_z_max",
+        "circularity",
+        "hypothesis",
+        "review_hint",
+        "x",
+        "y",
+        "geometry",
+    ]
+    gdf = gpd.GeoDataFrame(records, geometry="geometry", crs=crs) if records else gpd.GeoDataFrame(columns=columns, geometry="geometry", crs=crs)
+    return residual, residual_z, ids, gdf
+
+
 def enrich_candidates(candidates):
     if not len(candidates):
         return candidates
@@ -271,16 +474,26 @@ def write_raster(path, data, profile, nodata=None):
         dst.write(data, 1)
 
 
-def write_interactive_map(out: Path, candidates) -> None:
+def write_interactive_map(out: Path, candidates, singularities=None) -> None:
+    singularities = singularities if singularities is not None else candidates.iloc[0:0].copy()
     if len(candidates):
         wgs84 = candidates.to_crs(epsg=4326)
         center_lat = float(candidates["latitude"].mean()) if "latitude" in candidates else 46.5
         center_lon = float(candidates["longitude"].mean()) if "longitude" in candidates else 2.5
         geojson = wgs84.to_json()
+    elif len(singularities):
+        center_lat = float(singularities["latitude"].mean()) if "latitude" in singularities else 46.5
+        center_lon = float(singularities["longitude"].mean()) if "longitude" in singularities else 2.5
+        geojson = '{"type":"FeatureCollection","features":[]}'
     else:
         center_lat = 46.5
         center_lon = 2.5
         geojson = '{"type":"FeatureCollection","features":[]}'
+    singularity_geojson = (
+        singularities.to_crs(epsg=4326).to_json()
+        if len(singularities)
+        else '{"type":"FeatureCollection","features":[]}'
+    )
 
     map_html = f"""<!doctype html>
 <html lang="fr">
@@ -310,18 +523,20 @@ def write_interactive_map(out: Path, candidates) -> None:
   <div id="map"></div>
   <aside class="panel">
     <h1>LiDAR Cave Scan</h1>
-    <p>Carte zoomable des candidats. Les contours indiquent des dépressions de surface à vérifier, pas des grottes confirmées.</p>
-    <p>Utilise la molette pour zoomer/dézoomer, clique sur un candidat pour voir ses coordonnées.</p>
+    <p>Carte zoomable des candidats. Rouge/orange/bleu = dépressions fermées. Violet = singularités morphologiques locales.</p>
+    <p>Utilise la molette pour zoomer/dézoomer, clique sur une forme pour voir coordonnées, score et contrôle conseillé.</p>
     <div class="legend">
       <div><span class="swatch" style="background:#d7191c"></span>A - priorite terrain</div>
       <div><span class="swatch" style="background:#fdae61"></span>B - interessant</div>
       <div><span class="swatch" style="background:#2c7bb6"></span>C - controle rapide</div>
       <div><span class="swatch" style="background:#969696"></span>D - faible signal</div>
+      <div><span class="swatch" style="background:#7a3db8"></span>Singularités terrain</div>
     </div>
   </aside>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const candidates = {geojson};
+    const singularities = {singularity_geojson};
     const colors = {{
       "A - priorite terrain": "#d7191c",
       "B - interessant": "#fdae61",
@@ -334,7 +549,7 @@ def write_interactive_map(out: Path, candidates) -> None:
       attribution: "&copy; OpenStreetMap contributors"
     }}).addTo(map);
 
-    const layer = L.geoJSON(candidates, {{
+    const candidateLayer = L.geoJSON(candidates, {{
       style: feature => ({{
         color: colors[feature.properties.priority_class] || "#d4573d",
         weight: 3,
@@ -363,8 +578,47 @@ def write_interactive_map(out: Path, candidates) -> None:
         `);
       }}
     }}).addTo(map);
-    if (layer.getBounds().isValid()) {{
-      map.fitBounds(layer.getBounds(), {{ padding: [40, 40], maxZoom: 18 }});
+    const singularityLayer = L.geoJSON(singularities, {{
+      style: () => ({{
+        color: "#7a3db8",
+        weight: 2.4,
+        dashArray: "6 4",
+        fillColor: "#7a3db8",
+        fillOpacity: 0.12
+      }}),
+      onEachFeature: (feature, layer) => {{
+        const p = feature.properties;
+        const lat = p.latitude;
+        const lon = p.longitude;
+        layer.bindPopup(`
+          <div class="popup">
+            <h3>Singularité ${{p.id}} - score ${{p.singularity_score}}</h3>
+            <table>
+              <tr><td>Classe</td><td>${{p.singularity_class || ""}}</td></tr>
+              <tr><td>Type</td><td>${{p.singularity_type || ""}}</td></tr>
+              <tr><td>Coordonnées</td><td>${{lat}}, ${{lon}}</td></tr>
+              <tr><td>Surface</td><td>${{p.area_m2}} m²</td></tr>
+              <tr><td>Résidu max</td><td>${{p.abs_residual_m}} m</td></tr>
+              <tr><td>Z max</td><td>${{p.abs_z_max}}</td></tr>
+              <tr><td>Rugosité</td><td>${{p.roughness_m}} m</td></tr>
+              <tr><td>Lecture</td><td>${{p.hypothesis || ""}}</td></tr>
+              <tr><td>Action</td><td>${{p.review_hint || ""}}</td></tr>
+            </table>
+            <p><a target="_blank" href="${{p.google_maps}}">Ouvrir dans Google Maps</a></p>
+            <p><a target="_blank" href="${{p.openstreetmap}}">Ouvrir dans OpenStreetMap</a></p>
+          </div>
+        `);
+      }}
+    }}).addTo(map);
+    L.control.layers(null, {{
+      "Dépressions candidates": candidateLayer,
+      "Singularités terrain": singularityLayer
+    }}, {{ collapsed: false }}).addTo(map);
+    const bounds = L.latLngBounds([]);
+    if (candidateLayer.getBounds().isValid()) bounds.extend(candidateLayer.getBounds());
+    if (singularityLayer.getBounds().isValid()) bounds.extend(singularityLayer.getBounds());
+    if (bounds.isValid()) {{
+      map.fitBounds(bounds, {{ padding: [40, 40], maxZoom: 18 }});
     }}
   </script>
 </body>
@@ -373,7 +627,8 @@ def write_interactive_map(out: Path, candidates) -> None:
     (out / "interactive_map.html").write_text(map_html, encoding="utf-8")
 
 
-def write_report(out: Path, candidates, run_metadata: dict) -> None:
+def write_report(out: Path, candidates, run_metadata: dict, singularities=None) -> None:
+    singularities = singularities if singularities is not None else candidates.iloc[0:0].copy()
     rows = []
     for _, row in candidates.head(100).iterrows():
         rows.append(
@@ -399,6 +654,30 @@ def write_report(out: Path, candidates, run_metadata: dict) -> None:
         table = "\n".join(rows)
     else:
         table = '<tr><td colspan="14">Aucun candidat conserve avec ces seuils.</td></tr>'
+
+    singularity_rows = []
+    for _, row in singularities.head(150).iterrows():
+        singularity_rows.append(
+            "<tr>"
+            f"<td>{int(row['id'])}</td>"
+            f"<td>{html.escape(str(row.get('singularity_class', '')))}</td>"
+            f"<td>{row.get('singularity_score', '')}</td>"
+            f"<td>{html.escape(str(row.get('singularity_type', '')))}</td>"
+            f"<td>{row.get('abs_residual_m', '')}</td>"
+            f"<td>{row.get('abs_z_max', '')}</td>"
+            f"<td>{row.get('roughness_m', '')}</td>"
+            f"<td>{row.get('area_m2', '')}</td>"
+            f"<td>{html.escape(str(row.get('hypothesis', '')))}</td>"
+            f"<td>{html.escape(str(row.get('review_hint', '')))}</td>"
+            f"<td>{row.get('latitude', '')}</td>"
+            f"<td>{row.get('longitude', '')}</td>"
+            f"<td><a href=\"{html.escape(str(row.get('google_maps', '')))}\">Google Maps</a></td>"
+            "</tr>"
+        )
+    if singularity_rows:
+        singularity_table = "\n".join(singularity_rows)
+    else:
+        singularity_table = '<tr><td colspan="13">Aucune singularite conservee avec ces seuils.</td></tr>'
 
     report = f"""<!doctype html>
 <html lang="fr">
@@ -431,8 +710,8 @@ def write_report(out: Path, candidates, run_metadata: dict) -> None:
     <section class="grid">
       <div class="metric"><span>Candidats</span><strong>{run_metadata.get('candidates', 0)}</strong></div>
       <div class="metric"><span>Meilleur score</span><strong>{int(candidates['terrain_score'].max()) if len(candidates) else 0}</strong></div>
+      <div class="metric"><span>Singularités</span><strong>{run_metadata.get('singularities', 0)}</strong></div>
       <div class="metric"><span>CRS</span><strong style="font-size:15px">{html.escape(str(run_metadata.get('crs', '')))}</strong></div>
-      <div class="metric"><span>Seuil profondeur</span><strong>{run_metadata['parameters'].get('min_depth')} m</strong></div>
     </section>
     <p class="warning">{html.escape(run_metadata.get('warning', ''))}</p>
     <section class="panel">
@@ -455,8 +734,21 @@ def write_report(out: Path, candidates, run_metadata: dict) -> None:
       </table>
     </section>
     <section class="panel">
+      <h2>Singularités morphologiques</h2>
+      <p>Ces objets signalent des formes locales atypiques dans le relief: creux, bosses, ruptures ou textures. Ils ne remplacent pas les dépressions fermées; ils élargissent le balayage.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>Classe</th><th>Score</th><th>Type</th><th>Résidu m</th><th>Z max</th><th>Rugosité m</th>
+            <th>Surface m²</th><th>Lecture</th><th>Contrôle conseillé</th><th>Latitude</th><th>Longitude</th><th>Carte</th>
+          </tr>
+        </thead>
+        <tbody>{singularity_table}</tbody>
+      </table>
+    </section>
+    <section class="panel">
       <h2>Fichiers produits</h2>
-      <p><a href="interactive_map.html">interactive_map.html</a> · <a href="candidate_locations.csv">candidate_locations.csv</a> · <a href="candidates.csv">candidates.csv</a> · <a href="candidates.geojson">candidates.geojson</a> · <a href="candidates.gpkg">candidates.gpkg</a> · <a href="ranked_candidates.png">ranked_candidates.png</a></p>
+      <p><a href="interactive_map.html">interactive_map.html</a> · <a href="candidate_locations.csv">candidate_locations.csv</a> · <a href="singularity_locations.csv">singularity_locations.csv</a> · <a href="candidates.csv">candidates.csv</a> · <a href="singularities.csv">singularities.csv</a> · <a href="candidates.geojson">candidates.geojson</a> · <a href="singularities.geojson">singularities.geojson</a> · <a href="ranked_candidates.png">ranked_candidates.png</a> · <a href="singularity_map.png">singularity_map.png</a></p>
       <p><a href="science_guide.html">Comprendre l'outil et les limites scientifiques</a></p>
     </section>
   </main>
@@ -477,6 +769,11 @@ def run_lidar_scan(
     geology: str | None = None,
     cavities: str | None = None,
     faults: str | None = None,
+    include_singularities: bool = True,
+    singularity_z: float = 2.4,
+    singularity_min_area: float = 8.0,
+    singularity_max_area: float = 2500.0,
+    smooth_sigma: float = 6.0,
 ) -> Path:
     import geopandas as gpd
     import matplotlib
@@ -569,6 +866,52 @@ def run_lidar_scan(
     slope = np.degrees(np.arctan(np.hypot(gx, gy)))
     write_raster(out / "slope_deg.tif", np.where(valid, slope, -9999).astype("float32"), profile, -9999)
 
+    if include_singularities:
+        residual, residual_z, singularity_ids, singularities = detect_singularities(
+            dem,
+            valid,
+            transform,
+            crs,
+            smooth_sigma=smooth_sigma,
+            z_threshold=singularity_z,
+            min_area=singularity_min_area,
+            max_area=singularity_max_area,
+        )
+        write_raster(out / "terrain_residual.tif", np.where(valid, residual, -9999).astype("float32"), profile, -9999)
+        write_raster(out / "terrain_anomaly_z.tif", np.where(valid, residual_z, -9999).astype("float32"), profile, -9999)
+        write_raster(out / "singularity_ids.tif", singularity_ids, profile, 0)
+        singularities = add_wgs84_locations(singularities)
+        if len(singularities):
+            singularities = singularities.sort_values("singularity_score", ascending=False)
+            singularities.to_file(out / "singularities.gpkg", layer="singularities", driver="GPKG")
+            singularities.to_file(out / "singularities.geojson", driver="GeoJSON")
+    else:
+        residual = np.zeros_like(dem, dtype=np.float64)
+        residual_z = np.zeros_like(dem, dtype=np.float64)
+        singularities = gpd.GeoDataFrame(columns=["id", "geometry"], geometry="geometry", crs=crs)
+    singularities.drop(columns="geometry").to_csv(out / "singularities.csv", index=False)
+    singularity_columns = [
+        column
+        for column in [
+            "id",
+            "singularity_class",
+            "singularity_score",
+            "singularity_type",
+            "latitude",
+            "longitude",
+            "google_maps",
+            "openstreetmap",
+            "abs_residual_m",
+            "abs_z_max",
+            "roughness_m",
+            "area_m2",
+            "hypothesis",
+            "review_hint",
+        ]
+        if column in singularities.columns
+    ]
+    singularities[singularity_columns].to_csv(out / "singularity_locations.csv", index=False)
+
     shade = LightSource(azdeg=315, altdeg=45).hillshade(dem, vert_exag=1, dx=dx, dy=dy)
     fig, ax = plt.subplots(figsize=(13, 9))
     extent = [
@@ -597,6 +940,9 @@ def run_lidar_scan(
                 color="#101010",
                 bbox={"boxstyle": "round,pad=0.18", "fc": "white", "ec": "none", "alpha": 0.78},
             )
+    if len(singularities):
+        singularities.boundary.plot(ax=ax, edgecolor="#7a3db8", linewidth=1.3, linestyle="--", label="Singularites terrain")
+    if len(candidates) or len(singularities):
         ax.legend(loc="upper right", framealpha=0.9)
     ax.set_title("Depressions candidates - LiDAR (scores exploratoires, non valides)")
     ax.set_xlabel("X (m)")
@@ -622,25 +968,62 @@ def run_lidar_scan(
         fig.savefig(out / "ranked_candidates.png", dpi=160)
         plt.close(fig)
 
+    if include_singularities:
+        fig, ax = plt.subplots(figsize=(13, 9))
+        z_values = residual_z[valid]
+        vmax = float(np.nanpercentile(np.abs(z_values), 98)) if len(z_values) else 3.0
+        vmax = max(vmax, singularity_z + 0.5)
+        im = ax.imshow(
+            np.ma.masked_where(~valid, residual_z),
+            cmap="coolwarm",
+            vmin=-vmax,
+            vmax=vmax,
+            extent=extent,
+        )
+        if len(singularities):
+            singularities.boundary.plot(ax=ax, edgecolor="#101010", linewidth=1.2)
+            for _, row in singularities.head(80).iterrows():
+                ax.annotate(
+                    f"S{row['id']} ({row['singularity_score']})",
+                    (row["x"], row["y"]),
+                    fontsize=7,
+                    color="#101010",
+                    bbox={"boxstyle": "round,pad=0.16", "fc": "white", "ec": "none", "alpha": 0.72},
+                )
+        ax.set_title("Singularites morphologiques - residu local normalise")
+        ax.set_xlabel("X (m)")
+        ax.set_ylabel("Y (m)")
+        ax.set_aspect("equal")
+        fig.colorbar(im, ax=ax, shrink=0.78, label="Score z local")
+        fig.tight_layout()
+        fig.savefig(out / "singularity_map.png", dpi=160)
+        plt.close(fig)
+
     run_metadata = {
         "input": str(dem_path),
         "crs": str(crs),
         "candidates": int(len(candidates)),
+        "singularities": int(len(singularities)),
         "parameters": {
             "bbox": list(bbox) if bbox else None,
             "min_depth": min_depth,
             "min_area": min_area,
             "max_area": max_area,
             "max_cells": max_cells,
+            "include_singularities": include_singularities,
+            "singularity_z": singularity_z,
+            "singularity_min_area": singularity_min_area,
+            "singularity_max_area": singularity_max_area,
+            "smooth_sigma": smooth_sigma,
             "geology": geology,
             "cavities": cavities,
             "faults": faults,
         },
-        "warning": "Screening only. No subsurface imaging or confirmed cave detection.",
+        "warning": "Screening only. No subsurface imaging, no confirmed cave detection. Singularities are morphometric outliers to review, not discoveries.",
     }
     (out / "run.json").write_text(json.dumps(run_metadata, indent=2, ensure_ascii=False), encoding="utf-8")
-    write_interactive_map(out, candidates)
+    write_interactive_map(out, candidates, singularities)
     write_science_guide(out)
-    write_report(out, candidates, run_metadata)
-    print(f"{len(candidates)} candidats. Resultats : {out.resolve()}")
+    write_report(out, candidates, run_metadata, singularities)
+    print(f"{len(candidates)} candidats, {len(singularities)} singularites. Resultats : {out.resolve()}")
     return out

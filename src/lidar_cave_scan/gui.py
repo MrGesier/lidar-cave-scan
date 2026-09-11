@@ -71,6 +71,11 @@ class CaveScanApp(tk.Tk):
         self.min_depth = tk.DoubleVar(value=0.5)
         self.min_area = tk.DoubleVar(value=10.0)
         self.max_area = tk.DoubleVar(value=10000.0)
+        self.analysis_profile = tk.StringVar(value="Standard")
+        self.detect_singularities = tk.BooleanVar(value=True)
+        self.singularity_z = tk.DoubleVar(value=2.4)
+        self.singularity_min_area = tk.DoubleVar(value=8.0)
+        self.smooth_sigma = tk.DoubleVar(value=6.0)
         self.catalog_bbox = tk.StringVar(value="-0.25 43.0 -0.05 43.15")
         self.catalog_start = tk.StringVar(value="2025-01-01")
         self.catalog_end = tk.StringVar(value="2025-02-01")
@@ -129,9 +134,9 @@ class CaveScanApp(tk.Tk):
         guide.pack(fill="x", pady=(8, 12))
         for text in [
             "1. Lance une analyse ou la démo.",
-            "2. Ouvre la carte interactive pour te situer.",
-            "3. Clique un candidat pour voir coordonnées et liens.",
-            "4. Lis candidate_locations.csv pour trier les lieux.",
+            "2. Choisis Prudent, Standard ou Audacieux selon le niveau de bruit accepté.",
+            "3. Ouvre la carte interactive pour te situer.",
+            "4. Clique un candidat ou une singularité pour voir coordonnées et liens.",
         ]:
             ttk.Label(guide, text=text, background="#ffffff").pack(anchor="w", pady=2)
 
@@ -154,6 +159,12 @@ class CaveScanApp(tk.Tk):
         folder_button = ttk.Button(quick, text="Dossier résultats", command=self._open_output, style="Quiet.TButton")
         folder_button.grid(row=1, column=1, sticky="ew")
         Tooltip(folder_button, "Ouvre le dossier qui contient tous les fichiers produits par l'analyse.")
+        singularity_map_button = ttk.Button(quick, text="Carte singularités", command=self._open_singularity_map, style="Quiet.TButton")
+        singularity_map_button.grid(row=2, column=0, sticky="ew", padx=(0, 8), pady=(8, 0))
+        Tooltip(singularity_map_button, "Ouvre singularity_map.png: une carte technique des anomalies locales du relief.")
+        singularity_list_button = ttk.Button(quick, text="Liste singularités", command=self._open_singularity_locations, style="Quiet.TButton")
+        singularity_list_button.grid(row=2, column=1, sticky="ew", pady=(8, 0))
+        Tooltip(singularity_list_button, "Ouvre singularity_locations.csv avec scores, types d'anomalies et liens de localisation.")
         quick.columnconfigure(0, weight=1)
         quick.columnconfigure(1, weight=1)
 
@@ -203,20 +214,57 @@ class CaveScanApp(tk.Tk):
         bbox_entry.grid(row=3, column=1, sticky="ew", padx=(10, 6), pady=8)
         Tooltip(bbox_entry, "Exemple Lambert-93: 420000 6242800 420240 6243000. Ne mets pas latitude/longitude ici.")
 
+        profile = ttk.Frame(frame, style="Card.TFrame")
+        profile.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(6, 12))
+        ttk.Label(profile, text="Mode d'inspection", font=("Segoe UI", 11, "bold"), background="#ffffff").grid(row=0, column=0, sticky="w")
+        profile_picker = ttk.Combobox(
+            profile,
+            textvariable=self.analysis_profile,
+            values=["Prudent", "Standard", "Audacieux"],
+            state="readonly",
+            width=14,
+        )
+        profile_picker.grid(row=0, column=1, sticky="w", padx=(12, 8))
+        profile_picker.bind("<<ComboboxSelected>>", lambda _event: self._apply_profile())
+        Tooltip(profile_picker, "Prudent réduit les faux positifs. Audacieux remonte plus de singularités mais génère plus de bruit.")
+        ttk.Button(profile, text="Appliquer", command=self._apply_profile, style="Quiet.TButton").grid(row=0, column=2, sticky="w")
+        ttk.Label(
+            profile,
+            text="Les singularités cherchent des formes locales atypiques: creux, bosses, ruptures ou textures anormales.",
+            wraplength=680,
+            background="#ffffff",
+            foreground="#44504a",
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        profile.columnconfigure(0, weight=1)
+
         params = ttk.Frame(frame)
-        params.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(8, 12))
+        params.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(8, 12))
         self._number_field(params, "Profondeur min. (m)", self.min_depth, 0, "Ignore les cuvettes moins profondes que ce seuil.")
         self._number_field(params, "Surface min. (m²)", self.min_area, 1, "Ignore les micro-formes trop petites ou bruyantes.")
         self._number_field(params, "Surface max. (m²)", self.max_area, 2, "Ignore les très grands bassins qui sont rarement des indices locaux.")
 
+        singularity_box = ttk.Frame(frame, style="Card.TFrame")
+        singularity_box.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(0, 12))
+        check = ttk.Checkbutton(
+            singularity_box,
+            text="Détecter aussi les singularités terrain",
+            variable=self.detect_singularities,
+        )
+        check.grid(row=0, column=0, columnspan=3, sticky="w")
+        Tooltip(check, "Ajoute une couche exploratoire: formes locales atypiques, même si elles ne sont pas des cuvettes fermées.")
+        self._number_field(singularity_box, "Seuil singularité z", self.singularity_z, 0, "Plus bas = plus audacieux, mais plus de bruit. Standard: 2.4.", row=1)
+        self._number_field(singularity_box, "Surface min. sing. (m²)", self.singularity_min_area, 1, "Ignore les anomalies trop petites.", row=1)
+        self._number_field(singularity_box, "Lissage local", self.smooth_sigma, 2, "Rayon en pixels utilisé pour comparer le terrain à sa tendance locale.", row=1)
+
         actions = ttk.Frame(frame)
-        actions.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        actions.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         run_btn = ttk.Button(actions, text="Lancer l'analyse", command=self._run_lidar, style="Accent.TButton")
         run_btn.pack(side="left")
         Tooltip(run_btn, "Calcule les dépressions candidates et génère tous les fichiers de sortie.")
         ttk.Button(actions, text="Carte interactive", command=self._open_interactive_map, style="Quiet.TButton").pack(side="left", padx=8)
         ttk.Button(actions, text="Liste des lieux", command=self._open_locations, style="Quiet.TButton").pack(side="left")
         ttk.Button(actions, text="Rapport HTML", command=self._open_report, style="Quiet.TButton").pack(side="left", padx=8)
+        ttk.Button(actions, text="Singularités", command=self._open_singularity_locations, style="Quiet.TButton").pack(side="left")
         ttk.Button(actions, text="Dossier", command=self._open_output, style="Quiet.TButton").pack(side="left")
 
         frame.columnconfigure(1, weight=1)
@@ -291,9 +339,9 @@ class CaveScanApp(tk.Tk):
         button.grid(row=row, column=2, sticky="e", pady=8)
         Tooltip(button, "Choisir le fichier ou dossier sur ton PC.")
 
-    def _number_field(self, frame, label, variable, column, tip):
+    def _number_field(self, frame, label, variable, column, tip, row=0):
         group = ttk.Frame(frame)
-        group.grid(row=0, column=column, sticky="ew", padx=(0, 10))
+        group.grid(row=row, column=column, sticky="ew", padx=(0, 10), pady=(8 if row else 0, 0))
         label_widget = ttk.Label(group, text=label)
         label_widget.pack(anchor="w")
         Tooltip(label_widget, tip)
@@ -325,10 +373,36 @@ class CaveScanApp(tk.Tk):
             16,
             h - 26,
             anchor="w",
-            text="La carte interactive donne zoom, coordonnées GPS et liens Google Maps",
+            text="Carte interactive: zoom, coordonnées GPS, candidats et singularités séparés",
             fill="#3f3a33",
             font=("Segoe UI", 9),
         )
+        self.preview.create_line(505, 76, 552, 88, 588, 63, fill="#7a3db8", width=3, dash=(6, 4))
+        self.preview.create_text(548, 112, text="S 74", fill="#7a3db8", font=("Segoe UI", 11, "bold"))
+
+    def _apply_profile(self) -> None:
+        profile = self.analysis_profile.get()
+        if profile == "Prudent":
+            self.min_depth.set(0.7)
+            self.min_area.set(20.0)
+            self.singularity_z.set(3.0)
+            self.singularity_min_area.set(15.0)
+            self.smooth_sigma.set(7.0)
+            self._log("Profil Prudent: moins de bruit, candidats plus stricts.")
+        elif profile == "Audacieux":
+            self.min_depth.set(0.25)
+            self.min_area.set(5.0)
+            self.singularity_z.set(1.8)
+            self.singularity_min_area.set(4.0)
+            self.smooth_sigma.set(5.0)
+            self._log("Profil Audacieux: plus de singularités, plus de faux positifs à trier.")
+        else:
+            self.min_depth.set(0.5)
+            self.min_area.set(10.0)
+            self.singularity_z.set(2.4)
+            self.singularity_min_area.set(8.0)
+            self.smooth_sigma.set(6.0)
+            self._log("Profil Standard: équilibre entre tri et exploration.")
 
     def _choose_dem(self) -> None:
         path = filedialog.askopenfilename(
@@ -361,7 +435,17 @@ class CaveScanApp(tk.Tk):
             str(self.min_area.get()),
             "--max-area",
             str(self.max_area.get()),
+            "--singularity-z",
+            str(self.singularity_z.get()),
+            "--singularity-min-area",
+            str(self.singularity_min_area.get()),
+            "--smooth-sigma",
+            str(self.smooth_sigma.get()),
         ]
+        if self.detect_singularities.get():
+            cmd.append("--detect-singularities")
+        else:
+            cmd.append("--no-detect-singularities")
         bbox = self.bbox.get().strip()
         if bbox:
             values = bbox.split()
@@ -470,6 +554,20 @@ class CaveScanApp(tk.Tk):
             os.startfile(path)
         else:
             messagebox.showinfo("Liste absente", "Lance une analyse LiDAR pour générer candidate_locations.csv.")
+
+    def _open_singularity_locations(self) -> None:
+        path = self._output_file("singularity_locations.csv")
+        if path.exists():
+            os.startfile(path)
+        else:
+            messagebox.showinfo("Liste absente", "Lance une analyse LiDAR avec singularités pour générer singularity_locations.csv.")
+
+    def _open_singularity_map(self) -> None:
+        path = self._output_file("singularity_map.png")
+        if path.exists():
+            os.startfile(path)
+        else:
+            messagebox.showinfo("Carte absente", "Lance une analyse LiDAR avec singularités pour générer singularity_map.png.")
 
     def _open_science_guide(self) -> None:
         path = self._output_file("science_guide.html")
